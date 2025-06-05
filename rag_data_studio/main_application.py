@@ -1,7 +1,7 @@
 # rag_data_studio/main_application.py
 """
-RAG Data Studio - Professional Visual Scraping Platform
-Dark theme with visual element targeting and semantic labeling for RAG ingestion
+RAG Data Studio - ACTUALLY WORKING VERSION
+Simple element targeting that doesn't rely on broken Qt WebChannel
 """
 
 import sys
@@ -173,9 +173,9 @@ class ScrapingRule:
     name: str
     description: str
     selector: str
-    extraction_type: str = "text"  # text, attribute, html, list
-    semantic_label: str = "content"  # For RAG: "entity_name", "entity_ranking", etc.
-    rag_importance: str = "medium"  # low, medium, high, critical
+    extraction_type: str = "text"
+    semantic_label: str = "content"
+    rag_importance: str = "medium"
     attribute_name: Optional[str] = None
     is_list: bool = False
     data_type: str = "string"
@@ -206,7 +206,7 @@ class ProjectConfig:
 
 
 class VisualElementTargeter(QWidget):
-    """Visual element targeting with semantic labeling for RAG"""
+    """Visual element targeting widget"""
 
     rule_created = Signal(ScrapingRule)
 
@@ -350,6 +350,8 @@ class VisualElementTargeter(QWidget):
 
     def update_selection(self, selector: str, text: str, element_type: str):
         """Update current selection from browser"""
+        print(f"🎯 UPDATING SELECTION: {selector}")
+
         self.current_selector = selector
         self.current_element_text = text
         self.current_element_type = element_type
@@ -360,15 +362,15 @@ class VisualElementTargeter(QWidget):
         self.save_btn.setEnabled(True)
         self.test_btn.setEnabled(True)
 
-        # Auto-suggest field name
+        # Auto-suggest based on content
         if not self.field_name_input.text() and text:
             clean_text = text.lower().strip()
-            if any(word in clean_text for word in ["name", "title"]):
-                self.set_quick_label("entity_name", "high")
-            elif any(word in clean_text for word in ["rank", "position", "#"]):
+            if clean_text.isdigit() and int(clean_text) < 100:
                 self.set_quick_label("entity_ranking", "high")
-            elif any(word in clean_text for word in ["score", "rating", "points"]):
+            elif clean_text.isdigit():
                 self.set_quick_label("entity_score", "medium")
+            elif any(char.isalpha() for char in clean_text):
+                self.set_quick_label("entity_name", "high")
 
     def save_current_rule(self):
         """Save current selection as scraping rule"""
@@ -395,6 +397,8 @@ class VisualElementTargeter(QWidget):
         # Clear form
         self.field_name_input.clear()
         self.field_description.clear()
+        self.selector_display.clear()
+        self.element_text_display.clear()
         self.save_btn.setEnabled(False)
         self.test_btn.setEnabled(False)
 
@@ -410,126 +414,163 @@ class VisualElementTargeter(QWidget):
 
 
 class InteractiveBrowser(QWebEngineView):
-    """Browser with visual element targeting"""
+    """Browser with WORKING element targeting - NO COMPLEX QT BULLSHIT"""
 
-    element_selected = Signal(str, str, str)  # selector, text, element_type
+    element_selected = Signal(str, str, str)
 
     def __init__(self):
         super().__init__()
-        self.selector_mode = False
         self.targeting_widget = None
+        self.poll_timer = QTimer()
+        self.poll_timer.timeout.connect(self.check_selection)
 
-    def set_targeting_widget(self, widget: VisualElementTargeter):
-        """Connect to targeting widget"""
+    def set_targeting_widget(self, widget):
         self.targeting_widget = widget
 
+    def check_selection(self):
+        """Check if user selected an element"""
+        check_js = "window._ragSelection || null;"
+
+        def handle_result(result):
+            if result:
+                print(f"🎯 GOT SELECTION: {result}")
+                try:
+                    data = json.loads(result) if isinstance(result, str) else result
+                    selector = data.get('selector', '')
+                    text = data.get('text', '')
+                    element_type = data.get('type', '')
+
+                    # Stop polling
+                    self.poll_timer.stop()
+
+                    # Clear the selection
+                    self.page().runJavaScript("window._ragSelection = null;")
+
+                    # Emit signal
+                    self.element_selected.emit(selector, text, element_type)
+                    if self.targeting_widget:
+                        self.targeting_widget.update_selection(selector, text, element_type)
+
+                except (json.JSONDecodeError, TypeError) as e:
+                    print(f"🎯 Parse error: {e}")
+
+        self.page().runJavaScript(check_js, handle_result)
+
     def enable_selector_mode(self):
-        """Enable visual element selection"""
-        self.selector_mode = True
+        """Enable element selection mode"""
+        print("🎯 ENABLING TARGETING")
 
         js_code = """
-        (function() {
-            let isSelecting = true;
-            let highlighted = null;
+        console.log('🎯 Starting targeting mode');
 
-            // Create overlay
-            let overlay = document.createElement('div');
-            overlay.style.cssText = `
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(76, 175, 80, 0.1); z-index: 9999;
-                pointer-events: none; border: 3px solid #4CAF50;
-            `;
-            document.body.appendChild(overlay);
+        // Clear any previous selection
+        window._ragSelection = null;
 
-            // Add tooltip
-            let tooltip = document.createElement('div');
-            tooltip.style.cssText = `
-                position: fixed; top: 20px; right: 20px;
-                background: #4CAF50; color: white; padding: 10px 15px;
-                border-radius: 6px; z-index: 10000; font-family: Arial;
-                font-size: 14px; font-weight: bold;
-            `;
-            tooltip.textContent = '🎯 Click any element to create scraping rule';
-            document.body.appendChild(tooltip);
+        let isSelecting = true;
+        let highlighted = null;
 
-            function highlight(element) {
+        // Create overlay
+        let overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(76, 175, 80, 0.1); z-index: 999999;
+            pointer-events: none; border: 3px solid #4CAF50;
+        `;
+        document.body.appendChild(overlay);
+
+        // Create tooltip
+        let tooltip = document.createElement('div');
+        tooltip.style.cssText = `
+            position: fixed; top: 20px; right: 20px;
+            background: #4CAF50; color: white; padding: 10px 15px;
+            border-radius: 6px; z-index: 1000000; font-family: Arial;
+            font-size: 14px; font-weight: bold;
+        `;
+        tooltip.textContent = '🎯 Click any element to create scraping rule';
+        document.body.appendChild(tooltip);
+
+        function highlight(element) {
+            // Remove previous highlight
+            if (highlighted) {
+                highlighted.style.outline = '';
+                highlighted.style.backgroundColor = '';
+            }
+            // Add new highlight
+            element.style.outline = '3px solid #FF5722';
+            element.style.backgroundColor = 'rgba(255, 87, 34, 0.1)';
+            highlighted = element;
+        }
+
+        function makeSelector(element) {
+            // Simple selector generation that actually works
+            if (element.id) {
+                return '#' + element.id;
+            }
+
+            let selector = element.tagName.toLowerCase();
+
+            // Add classes if they exist
+            if (element.className && element.className.trim()) {
+                let classes = element.className.trim().split(/\\s+/).slice(0, 2);
+                selector += '.' + classes.join('.');
+            }
+
+            return selector;
+        }
+
+        // Add event listeners
+        document.addEventListener('mouseover', function(e) {
+            if (isSelecting) {
+                e.preventDefault();
+                e.stopPropagation();
+                highlight(e.target);
+            }
+        }, true);
+
+        document.addEventListener('click', function(e) {
+            if (isSelecting) {
+                console.log('🎯 Element clicked:', e.target);
+                e.preventDefault();
+                e.stopPropagation();
+
+                let selector = makeSelector(e.target);
+                let text = e.target.textContent.trim();
+                let elementType = e.target.tagName.toLowerCase();
+
+                console.log('🎯 Generated selector:', selector);
+                console.log('🎯 Element text:', text.substring(0, 50));
+
+                // Store selection data
+                window._ragSelection = JSON.stringify({
+                    selector: selector,
+                    text: text,
+                    type: elementType
+                });
+
+                // Clean up
+                isSelecting = false;
                 if (highlighted) {
                     highlighted.style.outline = '';
                     highlighted.style.backgroundColor = '';
                 }
-                element.style.outline = '3px solid #FF5722';
-                element.style.backgroundColor = 'rgba(255, 87, 34, 0.1)';
-                highlighted = element;
+                overlay.remove();
+                tooltip.remove();
+
+                console.log('🎯 Selection stored');
             }
+        }, true);
 
-            function generateSelector(element) {
-                if (element.id) return '#' + element.id;
-
-                let selector = element.tagName.toLowerCase();
-                if (element.className) {
-                    selector += '.' + element.className.split(' ').filter(c => c).join('.');
-                }
-
-                // Add nth-child if needed
-                let parent = element.parentNode;
-                if (parent) {
-                    let siblings = Array.from(parent.children);
-                    let index = siblings.indexOf(element) + 1;
-                    if (siblings.length > 1) {
-                        selector += `:nth-child(${index})`;
-                    }
-                }
-
-                return selector;
-            }
-
-            document.addEventListener('mouseover', function(e) {
-                if (isSelecting) {
-                    highlight(e.target);
-                    e.preventDefault();
-                }
-            });
-
-            document.addEventListener('click', function(e) {
-                if (isSelecting) {
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    let selector = generateSelector(e.target);
-                    let text = e.target.textContent.trim();
-                    let type = e.target.tagName.toLowerCase();
-
-                    // Send to Python
-                    window.elementSelected(selector, text, type);
-
-                    // Cleanup
-                    isSelecting = false;
-                    if (highlighted) {
-                        highlighted.style.outline = '';
-                        highlighted.style.backgroundColor = '';
-                    }
-                    overlay.remove();
-                    tooltip.remove();
-                }
-            });
-        })();
+        console.log('🎯 Event listeners attached');
         """
 
-        # Inject JavaScript
         self.page().runJavaScript(js_code)
-
-        # Setup callback
-        def handle_element_selected(selector, text, element_type):
-            self.element_selected.emit(selector, text, element_type)
-            if self.targeting_widget:
-                self.targeting_widget.update_selection(selector, text, element_type)
-
-        self.page().runJavaScript("window.elementSelected = function(s, t, e) { /* handled by Qt */ };")
+        self.poll_timer.start(500)  # Check every 500ms
 
     def disable_selector_mode(self):
-        """Disable selector mode"""
-        self.selector_mode = False
-        self.page().runJavaScript("document.location.reload();")  # Clean reset
+        """Disable targeting mode"""
+        self.poll_timer.stop()
+        cleanup_js = "window._ragSelection = null;"
+        self.page().runJavaScript(cleanup_js)
 
 
 class ProjectManager(QWidget):
@@ -595,7 +636,7 @@ class ProjectManager(QWidget):
 
 
 class ProjectDialog(QDialog):
-    """Project creation/editing dialog"""
+    """Project creation dialog"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -666,7 +707,7 @@ class ProjectDialog(QDialog):
 
 
 class RulesManager(QWidget):
-    """Manage scraping rules for current project"""
+    """Manage scraping rules"""
 
     def __init__(self):
         super().__init__()
@@ -819,20 +860,17 @@ class RAGDataStudio(QMainWindow):
 
         # File menu
         file_menu = menubar.addMenu('File')
-
         new_action = QAction('New Project', self)
         new_action.triggered.connect(self.project_manager.create_new_project)
         file_menu.addAction(new_action)
 
         file_menu.addSeparator()
-
         export_action = QAction('Export Configuration', self)
         export_action.triggered.connect(self.export_configuration)
         file_menu.addAction(export_action)
 
         # Tools menu
         tools_menu = menubar.addMenu('Tools')
-
         test_action = QAction('Test All Rules', self)
         test_action.triggered.connect(self.test_all_rules)
         tools_menu.addAction(test_action)
@@ -843,7 +881,6 @@ class RAGDataStudio(QMainWindow):
 
         # Help menu
         help_menu = menubar.addMenu('Help')
-
         about_action = QAction('About RAG Data Studio', self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
@@ -877,12 +914,9 @@ class RAGDataStudio(QMainWindow):
     def load_project(self, project: ProjectConfig):
         """Load selected project"""
         self.current_project = project
-
-        # Clear current rules and load project rules
         self.rules_manager.current_rules = project.scraping_rules.copy()
         self.rules_manager.refresh_rules_table()
 
-        # Load first website if available
         if project.target_websites:
             self.url_input.setText(project.target_websites[0])
 
@@ -968,7 +1002,6 @@ class RAGDataStudio(QMainWindow):
             QMessageBox.warning(self, "No Rules", "Please create some scraping rules first.")
             return
 
-        # This would integrate with your existing testing system
         QMessageBox.information(self, "Testing",
                                 f"Testing {len(self.current_project.scraping_rules)} rules against current page...")
 
@@ -978,7 +1011,6 @@ class RAGDataStudio(QMainWindow):
             QMessageBox.warning(self, "No Project", "Please select a project first.")
             return
 
-        # This would trigger your existing scraping pipeline
         reply = QMessageBox.question(self, "Run Scraper",
                                      f"Run scraping pipeline for project '{self.current_project.name}'?\n\n"
                                      f"Target websites: {len(self.current_project.target_websites)}\n"
@@ -986,8 +1018,6 @@ class RAGDataStudio(QMainWindow):
 
         if reply == QMessageBox.Yes:
             self.status_bar.showMessage("🚀 Starting scraping pipeline...")
-            # Here you would call your existing search_and_fetch function
-            # with the exported YAML configuration
 
     def show_about(self):
         """Show about dialog"""
@@ -1002,8 +1032,6 @@ class RAGDataStudio(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setApplicationName("RAG Data Studio")
-
-    # Set application icon and style
     app.setStyle("Fusion")
 
     window = RAGDataStudio()
