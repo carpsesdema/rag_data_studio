@@ -3,15 +3,13 @@
 Professional export and deployment manager for RAG Data Studio
 """
 import os
-from typing import Dict, List, Any, Optional
+from typing import Dict
 from pathlib import Path
 import json
 import yaml
-import tempfile
-import shutil
 from datetime import datetime
 
-from main_application import ProjectConfig
+from rag_data_studio.main_application import ProjectConfig
 
 
 class ExportManager:
