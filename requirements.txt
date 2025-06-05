@@ -1,0 +1,143 @@
+# requirements.txt - RAG Data Studio Dependencies
+
+# =============================================================================
+# GUI Framework (Core)
+# =============================================================================
+PySide6            # Qt6-based GUI framework
+PyQt6-WebEngine        # Web engine for browser component
+
+# =============================================================================
+# HTTP Requests & Web Scraping (Core)
+# =============================================================================
+requests              # HTTP library
+beautifulsoup4    # HTML/XML parsing
+lxml                 # Fast XML/HTML parser
+trafilatura          # Content extraction from web pages
+selenium              # Web automation (optional for JS-heavy sites)
+
+# =============================================================================
+# Data Processing & Validation (Core)
+# =============================================================================
+pydantic          # Data validation and settings management
+PyYAML                      # YAML parsing for configurations
+python-dateutil       # Date parsing utilities
+
+# =============================================================================
+# NLP & Language Processing (Core)
+# =============================================================================
+spacy               # NLP library for entity extraction
+langdetect           # Language detection
+nltk                       # Natural language toolkit
+
+# Note: Install spaCy model with: python -m spacy download en_core_web_sm
+
+# =============================================================================
+# Search & Discovery (Core)
+# =============================================================================
+duckduckgo-search      # Search engine integration
+
+# =============================================================================
+# Document Processing (Core)
+# =============================================================================
+pdfminer.six               # PDF text extraction
+python-docx        # Word document processing
+openpyxl
+
+# =============================================================================
+# Async & Concurrency (Core)
+# =============================================================================
+aiohttp                # Async HTTP client
+asyncio-throttle       # Rate limiting for async requests
+
+# =============================================================================
+# Database & Storage (Optional)
+# =============================================================================
+sqlite-utils         # SQLite utilities
+datasets             # Hugging Face datasets (for RAG storage)
+
+# =============================================================================
+# Data Science & Analysis (Optional)
+# =============================================================================
+pandas                # Data manipulation
+numpy               # Numerical computing
+scikit-learn         # Machine learning utilities
+
+# =============================================================================
+# Configuration & Environment (Core)
+# =============================================================================
+python-dotenv        # Environment variable management
+click              # Command-line interface
+rich               # Rich terminal output
+
+# =============================================================================
+# Logging & Monitoring (Core)
+# =============================================================================
+loguru                # Enhanced logging
+tqdm                 # Progress bars
+
+# =============================================================================
+# Networking & HTTP (Core)
+# =============================================================================
+urllib3                # HTTP client
+certifi                   # SSL certificates
+httpx
+# =============================================================================
+# File Processing & Utilities (Core)
+# =============================================================================
+pathlib2
+chardet              # Character encoding detection
+python-magic       # File type detection
+
+# =============================================================================
+# Testing & Quality (Development)
+# =============================================================================
+# pytest>=7.2.0,<8.0.0                # Testing framework
+# pytest-qt>=4.2.0,<5.0.0             # Qt testing utilities
+# pytest-asyncio>=0.21.0,<1.0.0       # Async testing
+# pytest-cov>=4.0.0,<5.0.0            # Coverage reporting
+# pytest-mock>=3.10.0,<4.0.0          # Mocking utilities
+
+# =============================================================================
+# Code Quality (Development)
+# =============================================================================
+# black>=23.1.0,<24.0.0               # Code formatting
+# flake8>=6.0.0,<7.0.0                # Linting
+# mypy>=1.1.0,<2.0.0                  # Type checking
+# isort>=5.12.0,<6.0.0                # Import sorting
+# pre-commit>=3.1.0,<4.0.0            # Git hooks
+
+# =============================================================================
+# Documentation (Development)
+# =============================================================================
+# sphinx>=6.1.0,<7.0.0                # Documentation generation
+# sphinx-rtd-theme>=1.2.0,<2.0.0      # Read the Docs theme
+# myst-parser>=1.0.0,<2.0.0           # Markdown support for Sphinx
+
+# =============================================================================
+# Deployment & Distribution (Optional)
+# =============================================================================
+# cx-Freeze>=6.14.0,<7.0.0            # Cross-platform freezing
+# pyinstaller>=5.8.0,<6.0.0           # Application bundling
+# auto-py-to-exe>=2.34.0,<3.0.0       # GUI for PyInstaller
+
+# =============================================================================
+# Platform-Specific Dependencies
+# =============================================================================
+# Windows
+pywin32
+
+
+
+# =============================================================================
+# RAG & AI Integration (Optional Advanced Features)
+# =============================================================================
+# openai>=0.27.0,<1.0.0               # OpenAI API client
+# transformers>=4.27.0,<5.0.0         # Hugging Face transformers
+# sentence-transformers>=2.2.0,<3.0.0 # Sentence embeddings
+# chromadb>=0.3.0,<1.0.0              # Vector database
+# pinecone-client>=2.2.0,<3.0.0       # Pinecone vector database
+# weaviate-client>=3.15.0,<4.0.0      # Weaviate vector database
+
+# =============================================================================
+# Version Constraints for Stability
+# =============================================================================
