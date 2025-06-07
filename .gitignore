@@ -522,4 +522,4 @@ training_data/
 # Reports and deliverables (uncomment if you don't want to track these)
 # reports/
 # deliverables/
-# client_reports/
+# client_reports/!/rag_studio_bridge.log
