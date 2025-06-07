@@ -1,478 +1,1209 @@
-# gui/main_window.py
+# rag_data_studio/main_application.py
+"""
+RAG Data Studio - Clean & Simple Visual Scraper Builder
+Apple-style simplicity, wired to your backend scraper
+"""
+
 import sys
-import logging
-from typing import List
+import json
+import uuid
+from pathlib import Path
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass, asdict
+from datetime import datetime
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget,
-    QVBoxLayout, QHBoxLayout, QLineEdit,
-    QPushButton, QPlainTextEdit, QFileDialog,
-    QLabel, QComboBox, QProgressBar, QCheckBox,  # QCheckBox not used, can remove
-    QGroupBox, QTextEdit, QTabWidget, QSplitter
-)
+from PySide6.QtWidgets import *
+from PySide6.QtCore import *
+from PySide6.QtGui import *
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
-from scraper.searcher import search_and_fetch
-from scraper.rag_models import EnrichedItem  # <-- Import EnrichedItem
-from storage.saver import save_enriched_items_to_disk
-# <-- Updated import
-from utils.logger import setup_logger
-import config
-import json  # For pretty printing metadata in GUI
+# Dark Theme Stylesheet
+DARK_THEME = """
+QMainWindow, QWidget {
+    background-color: #1e1e1e;
+    color: #ffffff;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 11px;
+}
+
+QGroupBox {
+    font-weight: bold;
+    border: 2px solid #404040;
+    border-radius: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    background-color: #2d2d2d;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px 0 5px;
+    color: #4CAF50;
+}
+
+QPushButton {
+    background-color: #404040;
+    border: 1px solid #606060;
+    border-radius: 6px;
+    padding: 8px 16px;
+    color: white;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #505050;
+    border-color: #4CAF50;
+}
+
+QPushButton:pressed {
+    background-color: #303030;
+}
+
+QPushButton[class="success"] {
+    background-color: #4CAF50;
+    border-color: #45a049;
+}
+
+QPushButton[class="success"]:hover {
+    background-color: #45a049;
+}
+
+QLineEdit, QTextEdit, QPlainTextEdit {
+    background-color: #3a3a3a;
+    border: 2px solid #555555;
+    border-radius: 6px;
+    padding: 6px;
+    color: white;
+    selection-background-color: #4CAF50;
+}
+
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+    border-color: #4CAF50;
+}
+
+QComboBox {
+    background-color: #3a3a3a;
+    border: 2px solid #555555;
+    border-radius: 6px;
+    padding: 6px;
+    color: white;
+    min-width: 100px;
+}
+
+QComboBox:hover {
+    border-color: #4CAF50;
+}
+
+QComboBox::drop-down {
+    border: none;
+    background-color: #505050;
+    border-radius: 3px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #3a3a3a;
+    border: 1px solid #555555;
+    selection-background-color: #4CAF50;
+    color: white;
+}
+
+QTableWidget {
+    background-color: #2a2a2a;
+    alternate-background-color: #343434;
+    gridline-color: #555555;
+    border: 1px solid #555555;
+    border-radius: 6px;
+}
+
+QTableWidget::item:selected {
+    background-color: #4CAF50;
+    color: white;
+}
+
+QHeaderView::section {
+    background-color: #404040;
+    color: white;
+    padding: 8px;
+    border: 1px solid #555555;
+    font-weight: bold;
+}
+
+QListWidget {
+    background-color: #2a2a2a;
+    border: 1px solid #555555;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QListWidget::item:selected {
+    background-color: #4CAF50;
+    color: white;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #555555;
+    border-radius: 3px;
+    background-color: #3a3a3a;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #4CAF50;
+    border-color: #4CAF50;
+}
+
+QStatusBar {
+    background-color: #2a2a2a;
+    border-top: 1px solid #555555;
+    color: #ffffff;
+}
+
+QSplitter::handle {
+    background-color: #404040;
+}
+"""
 
 
-class FetchWorker(QThread):
-    progress = Signal(int, str)
-    # MODIFIED: Emits List[EnrichedItem] and a status message
-    finished = Signal(list, str)  # list will be List[EnrichedItem]
-    error = Signal(str)
-
-    def __init__(self, query, mode, content_type_for_gui, logger_instance):
-        super().__init__()
-        self.query = query
-        self.mode = mode  # 'Search' or 'URL'
-        self.content_type_for_gui = content_type_for_gui  # Hint like 'html', 'pdf', 'auto'
-        self.logger = logger_instance
-        # self.total_sources = config.SEARCH_SOURCES_COUNT # This seems like a legacy var
-
-    def run(self):
-        try:
-            self.progress.emit(10,
-                               f"Starting search for: {self.query} (Mode: {self.mode}, Type Hint: {self.content_type_for_gui})...")
-
-            def backend_progress_callback(message, percentage_step):
-                # Scale backend progress (0-100) to GUI progress (e.g., 20-90%)
-                gui_progress_value = 20 + int(percentage_step * 0.7)
-                self.progress.emit(gui_progress_value, message)
-
-            # search_and_fetch now returns List[EnrichedItem]
-            enriched_items_list: List[EnrichedItem] = search_and_fetch(
-                self.query,  # This is query_or_config_path for the backend
-                self.logger,
-                progress_callback=backend_progress_callback,
-                content_type_gui=self.content_type_for_gui if self.content_type_for_gui != 'auto' else None
-            )
-
-            status_msg = f"Processed {len(enriched_items_list)} items for '{self.query}'."
-            # The logger.enhanced_snippet_data is an internal mechanism for the logger,
-            # we now have the full enriched_items_list directly.
-            # if hasattr(self.logger, 'enhanced_snippet_data') and self.logger.enhanced_snippet_data:
-            #     status_msg += f" Enriched data available for {len(self.logger.enhanced_snippet_data)} details."
-
-            self.progress.emit(100, "Processing complete.")
-            self.finished.emit(enriched_items_list, status_msg)
-
-        except Exception as e:
-            self.logger.error(f"Error in FetchWorker for query '{self.query}': {e}", exc_info=True)
-            user_friendly_message = f"Fetch Error: {type(e).__name__} - {str(e)}. Check logs for detailed error messages."
-            self.error.emit(user_friendly_message)
+@dataclass
+class ScrapingRule:
+    """Simple scraping rule - matches your backend exactly"""
+    id: str
+    name: str
+    description: str
+    selector: str
+    extract_type: str = "text"
+    attribute_name: Optional[str] = None
+    is_list: bool = False
+    required: bool = False
 
 
-class SaveWorker(QThread):
-    finished = Signal(str)  # Emits status message
-    error = Signal(str)  # Emits error message
-
-    # MODIFIED: Takes List[EnrichedItem]
-    def __init__(self, enriched_items: List[EnrichedItem], directory: str, query_identifier: str,
-                 logger_instance: logging.Logger):
-        super().__init__()
-        self.enriched_items = enriched_items
-        self.directory = directory
-        self.query_identifier = query_identifier  # Used for base folder name if needed
-        self.logger = logger_instance
-
-    def run(self):
-        try:
-            # Use the new saving function from storage.saver
-            save_enriched_items_to_disk(
-                enriched_items=self.enriched_items,
-                base_output_directory=self.directory,
-                query_source_name=self.query_identifier  # Helps in naming the top-level folder for this save operation
-            )
-            self.finished.emit(f"Successfully saved {len(self.enriched_items)} processed items to {self.directory}.")
-        except Exception as e:
-            self.logger.error(f"Error saving processed items in SaveWorker: {e}", exc_info=True)
-            user_friendly_message = f"Save Error: {type(e).__name__} - {str(e)}. Check logs for details."
-            self.error.emit(user_friendly_message)
+@dataclass
+class ProjectConfig:
+    """Simple project configuration"""
+    id: str
+    name: str
+    description: str
+    domain: str
+    target_websites: List[str]
+    scraping_rules: List[ScrapingRule]
+    created_at: str
+    updated_at: str
 
 
-class EnhancedMainWindow(QMainWindow):
+class RuleEditDialog(QDialog):
+    """Dialog for editing scraping rules"""
+
+    def __init__(self, rule: ScrapingRule, parent=None):
+        super().__init__(parent)
+        self.rule = rule
+        self.setWindowTitle(f"Edit Rule: {rule.name}")
+        self.setModal(True)
+        self.resize(500, 400)
+        self.init_ui()
+        self.load_rule_data()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Form
+        form_layout = QFormLayout()
+
+        self.name_input = QLineEdit()
+        self.description_input = QLineEdit()
+        self.selector_input = QLineEdit()
+
+        self.extract_type_combo = QComboBox()
+        self.extract_type_combo.addItems(["text", "attribute", "html"])
+
+        self.attribute_input = QLineEdit()
+        self.attribute_input.setPlaceholderText("e.g., href, src, data-value")
+
+        self.is_list_check = QCheckBox("Extract as list")
+        self.required_check = QCheckBox("Required field")
+
+        form_layout.addRow("Name:", self.name_input)
+        form_layout.addRow("Description:", self.description_input)
+        form_layout.addRow("Selector:", self.selector_input)
+        form_layout.addRow("Extract Type:", self.extract_type_combo)
+        form_layout.addRow("Attribute Name:", self.attribute_input)
+        form_layout.addRow("", self.is_list_check)
+        form_layout.addRow("", self.required_check)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.save_btn = QPushButton("💾 Save Changes")
+        self.save_btn.setProperty("class", "success")
+        self.cancel_btn = QPushButton("Cancel")
+
+        button_layout.addStretch()
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.save_btn)
+
+        layout.addLayout(form_layout)
+        layout.addLayout(button_layout)
+
+        # Connect signals
+        self.save_btn.clicked.connect(self.save_changes)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.extract_type_combo.currentTextChanged.connect(self.on_extract_type_changed)
+
+    def load_rule_data(self):
+        """Load current rule data into form"""
+        self.name_input.setText(self.rule.name)
+        self.description_input.setText(self.rule.description)
+        self.selector_input.setText(self.rule.selector)
+        self.extract_type_combo.setCurrentText(self.rule.extract_type)
+        self.attribute_input.setText(self.rule.attribute_name or "")
+        self.is_list_check.setChecked(self.rule.is_list)
+        self.required_check.setChecked(self.rule.required)
+        self.on_extract_type_changed(self.rule.extract_type)
+
+    def on_extract_type_changed(self, extract_type):
+        """Enable/disable attribute field"""
+        self.attribute_input.setEnabled(extract_type == "attribute")
+
+    def save_changes(self):
+        """Save changes to rule"""
+        if not self.name_input.text().strip():
+            QMessageBox.warning(self, "Missing Name", "Please provide a rule name.")
+            return
+
+        self.rule.name = self.name_input.text().strip()
+        self.rule.description = self.description_input.text().strip()
+        self.rule.selector = self.selector_input.text().strip()
+        self.rule.extract_type = self.extract_type_combo.currentText()
+        self.rule.attribute_name = self.attribute_input.text().strip() if self.attribute_input.isEnabled() else None
+        self.rule.is_list = self.is_list_check.isChecked()
+        self.rule.required = self.required_check.isChecked()
+
+        self.accept()
+
+    def get_updated_rule(self) -> ScrapingRule:
+        """Get the updated rule"""
+        return self.rule
+
+
+class VisualElementTargeter(QWidget):
+    """Clean, simple element targeting - Apple-style"""
+
+    rule_created = Signal(ScrapingRule)
+
     def __init__(self):
         super().__init__()
-        self.logger = logging.getLogger(config.APP_NAME)  # Get main app logger
-        if not self.logger.handlers:  # Ensure it's configured if main.py didn't run first
-            self.logger = setup_logger(name=config.APP_NAME, log_file=config.LOG_FILE_PATH)
+        self.init_ui()
+        self.current_selector = ""
+        self.current_element_text = ""
+        self.current_element_type = ""
 
-        self.setWindowTitle(config.DEFAULT_WINDOW_TITLE)
-        self.resize(config.DEFAULT_WINDOW_WIDTH, config.DEFAULT_WINDOW_HEIGHT)
+    def init_ui(self):
+        layout = QVBoxLayout(self)
 
-        # MODIFIED: This will store the full EnrichedItem objects from the last fetch
-        self.complete_enriched_items_cache: List[EnrichedItem] = []
-        # This will store the strings for the "Content Preview" tab
-        self.preview_display_strings: List[str] = []
+        # Header
+        header = QLabel("🎯 Smart Element Targeting")
+        header.setFont(QFont("Arial", 14, QFont.Bold))
+        header.setStyleSheet("color: #4CAF50; margin: 10px 0;")
 
-        self._setup_enhanced_ui()
-        self.current_content_type_gui_selection = config.DEFAULT_CONTENT_TYPE_FOR_GUI  # From GUI dropdown
-        self.on_content_type_change()  # Initialize placeholder text
+        # Current selection
+        selection_group = QGroupBox("Current Selection")
+        selection_layout = QFormLayout(selection_group)
 
-    def _setup_enhanced_ui(self):
-        # ... (UI setup remains largely the same as your provided version) ...
-        # Key components:
-        # self.content_type_combo, self.mode_combo, self.url_input, self.fetch_button
-        # self.progress_bar, self.status_label
-        # self.snippets_edit (for Content Preview), self.analysis_edit (for Analysis & Metadata)
-        # self.insights_text (for Item Details)
-        # self.save_button (for "Save Raw Content"), self.rag_export_button
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
+        self.selector_display = QLineEdit()
+        self.selector_display.setReadOnly(True)
+        self.selector_display.setPlaceholderText("Click an element in the browser...")
 
-        # --- Input Group ---
-        input_group = QGroupBox("Search Configuration")
-        input_layout = QVBoxLayout(input_group)
+        self.element_text_display = QTextEdit()
+        self.element_text_display.setReadOnly(True)
+        self.element_text_display.setMaximumHeight(60)
 
-        if config.SHOW_CONTENT_TYPE_SELECTOR_GUI:
-            content_type_layout = QHBoxLayout()
-            content_type_layout.addWidget(QLabel("Content Type Hint:"))
-            self.content_type_combo = QComboBox()
-            for value, display_name in config.LANGUAGE_DISPLAY_NAMES_GUI.items():
-                # Check if this content type is generally enabled in config.CONTENT_TYPES
-                # or if it's the special 'auto' value.
-                if config.CONTENT_TYPES.get(value, True) or value == 'auto':
-                    self.content_type_combo.addItem(display_name, value)
+        self.smart_suggestions = QLabel()
+        self.smart_suggestions.setStyleSheet("color: #4CAF50; font-weight: bold; padding: 5px;")
+        self.smart_suggestions.setWordWrap(True)
 
-            default_idx = self.content_type_combo.findData(config.DEFAULT_CONTENT_TYPE_FOR_GUI)
-            if default_idx != -1: self.content_type_combo.setCurrentIndex(default_idx)
+        selection_layout.addRow("CSS Selector:", self.selector_display)
+        selection_layout.addRow("Element Text:", self.element_text_display)
+        selection_layout.addRow("AI Suggestion:", self.smart_suggestions)
 
-            self.content_type_combo.currentTextChanged.connect(self.on_content_type_change)
-            content_type_layout.addWidget(self.content_type_combo)
-            content_type_layout.addStretch()
-            input_layout.addLayout(content_type_layout)
+        # Simple field definition
+        field_group = QGroupBox("🏷️ Field Definition")
+        field_layout = QFormLayout(field_group)
 
-        mode_url_layout = QHBoxLayout()
-        mode_url_layout.addWidget(QLabel("Mode:"))
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Search Query / File Path", "Direct URL"])  # Clarified mode names
-        self.mode_combo.currentTextChanged.connect(self.on_mode_change)
-        mode_url_layout.addWidget(self.mode_combo)
+        self.field_name_input = QLineEdit()
+        self.field_name_input.setPlaceholderText("e.g., player_name, ranking_position")
 
-        mode_url_layout.addWidget(QLabel("Input:"))
-        self.url_input = QLineEdit()
-        # Placeholder text updated by on_mode_change / on_content_type_change
-        mode_url_layout.addWidget(self.url_input, 1)
+        self.field_description = QLineEdit()
+        self.field_description.setPlaceholderText("Brief description...")
 
-        self.fetch_button = QPushButton("🔍 Fetch & Process")
-        self.fetch_button.clicked.connect(self.on_fetch)
-        mode_url_layout.addWidget(self.fetch_button)
-        input_layout.addLayout(mode_url_layout)
-        main_layout.addWidget(input_group)
+        field_layout.addRow("Field Name:", self.field_name_input)
+        field_layout.addRow("Description:", self.field_description)
 
-        # --- Progress Bar ---
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        main_layout.addWidget(self.progress_bar)
+        # Smart actions
+        pattern_group = QGroupBox("🔍 Smart Actions")
+        pattern_layout = QVBoxLayout(pattern_group)
 
-        # --- Results Area (Splitter with Tabs and Details) ---
-        results_splitter = QSplitter(Qt.Horizontal)
+        self.bulk_extract_btn = QPushButton("📋 Extract All Similar Items")
+        self.bulk_extract_btn.setEnabled(False)
+        self.bulk_extract_btn.clicked.connect(self.create_bulk_extraction)
 
-        # Left side: Tabs for Preview and Analysis
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        self.results_tabs = QTabWidget()
+        self.container_select_btn = QPushButton("📦 Select Parent Container")
+        self.container_select_btn.setEnabled(False)
+        self.container_select_btn.clicked.connect(self.select_container)
 
-        self.snippets_edit = QPlainTextEdit()  # For "Content Preview"
-        self.snippets_edit.setReadOnly(True)
-        self.results_tabs.addTab(self.snippets_edit, "📄 Content Preview")
+        pattern_layout.addWidget(self.bulk_extract_btn)
+        pattern_layout.addWidget(self.container_select_btn)
 
-        self.analysis_edit = QTextEdit()  # For "Analysis & Metadata" - can show HTML
-        self.analysis_edit.setReadOnly(True)
-        self.results_tabs.addTab(self.analysis_edit, "📊 Analysis & Metadata")
+        # Options
+        options_group = QGroupBox("Options")
+        options_layout = QFormLayout(options_group)
 
-        left_layout.addWidget(self.results_tabs)
-        results_splitter.addWidget(left_widget)
+        self.extraction_type_combo = QComboBox()
+        self.extraction_type_combo.addItems(["text", "attribute", "html"])
 
-        # Right side: Insights/Details for a selected item (future use)
-        right_widget = QWidget()  # Placeholder for now
-        right_layout = QVBoxLayout(right_widget)
-        insights_group = QGroupBox("💡 Item Details (Future)")
-        insights_layout = QVBoxLayout(insights_group)
-        self.insights_text = QTextEdit()
-        self.insights_text.setReadOnly(True)
-        self.insights_text.setPlaceholderText(
-            "Select an item from Analysis tab (not yet implemented) or view overall summary in Analysis tab.")
-        insights_layout.addWidget(self.insights_text)
-        right_layout.addWidget(insights_group)
-        results_splitter.addWidget(right_widget)
-        results_splitter.setSizes([700, 300])  # Adjust initial sizes
+        self.attribute_input = QLineEdit()
+        self.attribute_input.setPlaceholderText("e.g., href, src, data-value")
+        self.attribute_input.setEnabled(False)
 
-        main_layout.addWidget(results_splitter, 1)  # Give results area more stretch factor
+        self.is_list_check = QCheckBox("Extract as list")
+        self.required_check = QCheckBox("Required field")
 
-        # --- Bottom Group (Export and Status) ---
-        bottom_group = QGroupBox("Actions & Status")
-        bottom_outer_layout = QVBoxLayout(bottom_group)
+        options_layout.addRow("Extract Type:", self.extraction_type_combo)
+        options_layout.addRow("Attribute Name:", self.attribute_input)
+        options_layout.addRow("", self.is_list_check)
+        options_layout.addRow("", self.required_check)
+
+        # Action buttons
+        action_layout = QHBoxLayout()
+        self.test_btn = QPushButton("🧪 Test")
+        self.test_btn.setEnabled(False)
+
+        self.save_btn = QPushButton("💾 Save Rule")
+        self.save_btn.setProperty("class", "success")
+        self.save_btn.setEnabled(False)
+
+        action_layout.addWidget(self.test_btn)
+        action_layout.addStretch()
+        action_layout.addWidget(self.save_btn)
+
+        # Add all components
+        layout.addWidget(header)
+        layout.addWidget(selection_group)
+        layout.addWidget(field_group)
+        layout.addWidget(pattern_group)
+        layout.addWidget(options_group)
+        layout.addLayout(action_layout)
+        layout.addStretch()
+
+        # Connect signals
+        self.extraction_type_combo.currentTextChanged.connect(self.on_extraction_type_changed)
+        self.save_btn.clicked.connect(self.save_current_rule)
+        self.test_btn.clicked.connect(self.test_current_selector)
+
+    def detect_content_type(self, text: str, element_type: str, selector: str) -> dict:
+        """Simple content detection"""
+        text = text.strip().lower()
+
+        # Name detection
+        if any(pattern in text for pattern in ['. ', ' jr', ' sr', ' iii']) or \
+                (len(text.split()) >= 2 and text.replace(' ', '').replace('.', '').isalpha()):
+            return {
+                'type': 'person_name',
+                'suggested_field': 'player_name' if 'rank' in selector else 'person_name'
+            }
+
+        # Ranking detection
+        if text.isdigit() and int(text) <= 1000 and ('rank' in selector or 'position' in selector):
+            return {
+                'type': 'ranking',
+                'suggested_field': 'ranking_position'
+            }
+
+        # Score/Points detection
+        if text.replace(',', '').replace('.', '').isdigit() and len(text) >= 3:
+            return {
+                'type': 'score',
+                'suggested_field': 'points' if 'point' in selector else 'score'
+            }
+
+        # Default
+        return {
+            'type': 'text',
+            'suggested_field': 'data_field'
+        }
+
+    def detect_container_pattern(self, selector: str) -> dict:
+        """Detect if this is part of a repeating pattern"""
+        patterns = {
+            'table_row': 'tr' in selector or 'tbody' in selector,
+            'list_item': 'li' in selector or 'ul' in selector or 'ol' in selector,
+            'card': 'card' in selector or 'item' in selector,
+            'grid': 'grid' in selector or 'col' in selector
+        }
+
+        for pattern_type, detected in patterns.items():
+            if detected:
+                return {
+                    'type': pattern_type,
+                    'bulk_possible': True,
+                    'container_suggestion': f"Extract all {pattern_type.replace('_', ' ')}s"
+                }
+
+        return {'type': 'single', 'bulk_possible': False}
+
+    def update_selection(self, selector: str, text: str, element_type: str):
+        """Enhanced selection with smart detection"""
+        self.current_selector = selector
+        self.current_element_text = text
+        self.current_element_type = element_type
+
+        self.selector_display.setText(selector)
+        self.element_text_display.setText(text[:200] + "..." if len(text) > 200 else text)
+
+        # Smart content detection
+        content_info = self.detect_content_type(text, element_type, selector)
+        pattern_info = self.detect_container_pattern(selector)
+
+        # Update suggestions
+        suggestion_text = f"🧠 Detected: {content_info['type'].replace('_', ' ').title()}"
+        if pattern_info['bulk_possible']:
+            suggestion_text += f" | 📋 {pattern_info['container_suggestion']}"
+
+        self.smart_suggestions.setText(suggestion_text)
+
+        # Auto-fill fields
+        self.field_name_input.setText(content_info['suggested_field'])
+
+        # Enable buttons
+        self.save_btn.setEnabled(True)
+        self.test_btn.setEnabled(True)
+        self.bulk_extract_btn.setEnabled(pattern_info['bulk_possible'])
+        self.container_select_btn.setEnabled(True)
+
+    def create_bulk_extraction(self):
+        """Create structured list extraction for similar items"""
+        reply = QMessageBox.question(self, "Bulk Extraction",
+                                     f"Create a structured list to extract all similar items?\n\n"
+                                     f"This will capture multiple records with the same pattern.")
+
+        if reply == QMessageBox.Yes:
+            rule = ScrapingRule(
+                id=f"bulk_rule_{uuid.uuid4().hex[:8]}",
+                name=f"{self.field_name_input.text()}_list",
+                description=f"Bulk extraction of {self.field_name_input.text()} data",
+                selector=self.suggest_container_selector(),
+                extract_type="structured_list",
+                is_list=True
+            )
+
+            self.rule_created.emit(rule)
+            QMessageBox.information(self, "Bulk Rule Created",
+                                    f"Created structured list rule: {rule.name}")
+
+    def select_container(self):
+        """Select parent container of current element"""
+        container_selector = self.suggest_container_selector()
+        self.selector_display.setText(container_selector)
+        self.current_selector = container_selector
+
+    def suggest_container_selector(self) -> str:
+        """Suggest container selector based on current selection"""
+        if 'td' in self.current_selector:
+            return self.current_selector.replace('td', 'tr').split(' td')[0] + ' tr'
+        elif 'li' in self.current_selector:
+            return self.current_selector.replace('li', 'ul li').split(' li')[0] + ' li'
+        else:
+            return self.current_selector
+
+    def on_extraction_type_changed(self, extraction_type):
+        """Enable/disable attribute field"""
+        self.attribute_input.setEnabled(extraction_type == "attribute")
+
+    def save_current_rule(self):
+        """Save current selection as scraping rule"""
+        if not self.current_selector or not self.field_name_input.text():
+            QMessageBox.warning(self, "Missing Information",
+                                "Please select an element and provide a field name.")
+            return
+
+        rule = ScrapingRule(
+            id=f"rule_{uuid.uuid4().hex[:8]}",
+            name=self.field_name_input.text(),
+            description=self.field_description.text() or f"Extracts {self.field_name_input.text()}",
+            selector=self.current_selector,
+            extract_type=self.extraction_type_combo.currentText(),
+            attribute_name=self.attribute_input.text() if self.attribute_input.isEnabled() else None,
+            is_list=self.is_list_check.isChecked(),
+            required=self.required_check.isChecked()
+        )
+
+        self.rule_created.emit(rule)
+
+        # Clear form
+        self.field_name_input.clear()
+        self.field_description.clear()
+        self.selector_display.clear()
+        self.element_text_display.clear()
+        self.smart_suggestions.clear()
+        self.save_btn.setEnabled(False)
+        self.test_btn.setEnabled(False)
+        self.bulk_extract_btn.setEnabled(False)
+
+        QMessageBox.information(self, "Rule Saved", f"Saved: {rule.name}")
+
+    def test_current_selector(self):
+        """Test current selector"""
+        if self.current_selector:
+            QMessageBox.information(self, "Test Results",
+                                    f"Testing: {self.current_selector}\n\n"
+                                    f"Sample text: {self.current_element_text[:100]}...")
+
+
+class InteractiveBrowser(QWebEngineView):
+    """Browser with smart element targeting"""
+
+    element_selected = Signal(str, str, str)
+
+    def __init__(self):
+        super().__init__()
+        self.targeting_widget = None
+        self.poll_timer = QTimer()
+        self.poll_timer.timeout.connect(self.check_selection)
+        self.is_targeting_active = False
+
+    def set_targeting_widget(self, widget):
+        self.targeting_widget = widget
+
+    def check_selection(self):
+        """Check if user selected an element"""
+        check_js = "window._ragSelection || null;"
+
+        def handle_result(result):
+            if result:
+                try:
+                    data = json.loads(result) if isinstance(result, str) else result
+                    selector = data.get('selector', '')
+                    text = data.get('text', '')
+                    element_type = data.get('type', '')
+
+                    self.poll_timer.stop()
+                    self.page().runJavaScript("window._ragSelection = null;")
+
+                    self.element_selected.emit(selector, text, element_type)
+                    if self.targeting_widget:
+                        self.targeting_widget.update_selection(selector, text, element_type)
+
+                except (json.JSONDecodeError, TypeError) as e:
+                    print(f"🎯 Parse error: {e}")
+
+        self.page().runJavaScript(check_js, handle_result)
+
+    def enable_selector_mode(self):
+        """Enable element selection mode with proper cleanup"""
+        if self.is_targeting_active:
+            return  # Already active, don't double-inject
+
+        self.is_targeting_active = True
+
+        js_code = """
+        // Clean up any existing targeting
+        if (window._ragTargetingCleanup) {
+            window._ragTargetingCleanup();
+        }
+
+        console.log('🎯 Starting smart targeting mode');
+        window._ragSelection = null;
+
+        let isSelecting = true;
+        let highlighted = null;
+        let overlay = null;
+        let tooltip = null;
+
+        // Create overlay
+        overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(76, 175, 80, 0.1); z-index: 999999;
+            pointer-events: none; border: 3px solid #4CAF50;
+        `;
+        document.body.appendChild(overlay);
+
+        // Create tooltip
+        tooltip = document.createElement('div');
+        tooltip.style.cssText = `
+            position: fixed; top: 20px; right: 20px;
+            background: #4CAF50; color: white; padding: 10px 15px;
+            border-radius: 6px; z-index: 1000000; font-family: Arial;
+            font-size: 14px; font-weight: bold;
+        `;
+        tooltip.textContent = '🎯 Click any element to create scraping rule';
+        document.body.appendChild(tooltip);
+
+        function highlight(element) {
+            if (highlighted) {
+                highlighted.style.outline = '';
+                highlighted.style.backgroundColor = '';
+            }
+            element.style.outline = '3px solid #FF5722';
+            element.style.backgroundColor = 'rgba(255, 87, 34, 0.1)';
+            highlighted = element;
+        }
+
+        function makeSmartSelector(element) {
+            if (element.id) {
+                return '#' + element.id;
+            }
+
+            let selector = element.tagName.toLowerCase();
+
+            // For table cells, include the row context
+            if (selector === 'td') {
+                let row = element.closest('tr');
+                if (row) {
+                    let cellIndex = Array.from(row.children).indexOf(element);
+                    selector = `tr td:nth-child(${cellIndex + 1})`;
+                }
+            }
+
+            // For list items
+            if (selector === 'li') {
+                let list = element.closest('ul, ol');
+                if (list) {
+                    selector = `${list.tagName.toLowerCase()} li`;
+                }
+            }
+
+            // Add specific classes if they exist
+            if (element.className && element.className.trim()) {
+                let classes = element.className.trim().split(/\\s+/)
+                    .filter(cls => !['active', 'selected', 'hover', 'focus'].includes(cls))
+                    .slice(0, 2);
+                if (classes.length > 0) {
+                    selector += '.' + classes.join('.');
+                }
+            }
+
+            return selector;
+        }
+
+        // Event handlers
+        function handleMouseOver(e) {
+            if (isSelecting) {
+                e.preventDefault();
+                e.stopPropagation();
+                highlight(e.target);
+            }
+        }
+
+        function handleClick(e) {
+            if (isSelecting) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                let selector = makeSmartSelector(e.target);
+                let text = e.target.textContent.trim();
+                let elementType = e.target.tagName.toLowerCase();
+
+                window._ragSelection = JSON.stringify({
+                    selector: selector,
+                    text: text,
+                    type: elementType
+                });
+
+                cleanup();
+            }
+        }
+
+        function cleanup() {
+            isSelecting = false;
+            if (highlighted) {
+                highlighted.style.outline = '';
+                highlighted.style.backgroundColor = '';
+            }
+            if (overlay) overlay.remove();
+            if (tooltip) tooltip.remove();
+
+            document.removeEventListener('mouseover', handleMouseOver, true);
+            document.removeEventListener('click', handleClick, true);
+        }
+
+        // Store cleanup function globally
+        window._ragTargetingCleanup = cleanup;
+
+        // Add event listeners
+        document.addEventListener('mouseover', handleMouseOver, true);
+        document.addEventListener('click', handleClick, true);
+        """
+
+        self.page().runJavaScript(js_code)
+        self.poll_timer.start(500)
+
+    def disable_selector_mode(self):
+        """Disable targeting mode"""
+        self.is_targeting_active = False
+        self.poll_timer.stop()
+        cleanup_js = """
+        if (window._ragTargetingCleanup) {
+            window._ragTargetingCleanup();
+        }
+        window._ragSelection = null;
+        """
+        self.page().runJavaScript(cleanup_js)
+
+
+class ProjectManager(QWidget):
+    """Project management panel"""
+
+    project_selected = Signal(ProjectConfig)
+
+    def __init__(self):
+        super().__init__()
+        self.projects = []
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        header = QLabel("📁 Projects")
+        header.setFont(QFont("Arial", 14, QFont.Bold))
+        header.setStyleSheet("color: #4CAF50; margin: 10px 0;")
+
+        self.project_list = QListWidget()
+        self.project_list.itemClicked.connect(self.on_project_selected)
 
         actions_layout = QHBoxLayout()
-        self.save_button = QPushButton("💾 Save Processed Content")  # Renamed button
-        self.save_button.setToolTip("Saves the full processed text and structured elements of fetched items to disk.")
-        self.save_button.clicked.connect(self.on_save_processed_content)  # Renamed handler
-        self.save_button.setEnabled(False)
-        actions_layout.addWidget(self.save_button)
+        self.new_btn = QPushButton("➕ New")
+        self.edit_btn = QPushButton("✏️ Edit")
+        self.delete_btn = QPushButton("🗑️ Delete")
 
-        # RAG Export button - currently informational
-        self.rag_export_button = QPushButton("ℹ️ RAG Export Info")
-        self.rag_export_button.setToolTip(
-            "RAG chunks (JSONL/Markdown) are automatically exported by the backend pipeline based on config.")
-        self.rag_export_button.clicked.connect(self.on_rag_export_info)
-        # self.rag_export_button.setEnabled(False) # It's informational, always enabled
-        actions_layout.addWidget(self.rag_export_button)
-        actions_layout.addStretch()
-        bottom_outer_layout.addLayout(actions_layout)
+        for btn in [self.new_btn, self.edit_btn, self.delete_btn]:
+            btn.setMaximumHeight(35)
+            actions_layout.addWidget(btn)
 
-        self.status_label = QLabel("Ready for modular content scraping.")
-        bottom_outer_layout.addWidget(self.status_label)
-        main_layout.addWidget(bottom_group)
+        layout.addWidget(header)
+        layout.addWidget(self.project_list)
+        layout.addLayout(actions_layout)
 
-    def on_content_type_change(self):
-        selected_data_value = self.content_type_combo.currentData()
-        self.current_content_type_gui_selection = selected_data_value
-        self._update_placeholder_text()
+        self.new_btn.clicked.connect(self.create_new_project)
 
-    def _update_placeholder_text(self):
-        mode = self.mode_combo.currentText()
-        type_hint = self.content_type_combo.currentText()  # Display name
+    def create_new_project(self):
+        """Create new project"""
+        dialog = ProjectDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            project = dialog.get_project_config()
+            self.projects.append(project)
+            self.refresh_project_list()
 
-        if "URL" in mode:
-            self.url_input.setPlaceholderText(f"Enter Direct URL (Content type: {type_hint})")
-        else:  # Search Query or File Path
-            self.url_input.setPlaceholderText(f"Enter Search Query or YAML Config Path (Content hint: {type_hint})")
+    def refresh_project_list(self):
+        """Refresh project list"""
+        self.project_list.clear()
+        for project in self.projects:
+            item = QListWidgetItem(f"{project.name} ({project.domain})")
+            item.setData(Qt.UserRole, project)
+            self.project_list.addItem(item)
 
-        self.snippets_edit.setPlaceholderText(f"Preview of fetched content ({type_hint}) will appear here...")
-        self.analysis_edit.setPlaceholderText(f"Analysis & metadata summary ({type_hint}) will appear here...")
+    def on_project_selected(self, item):
+        """Handle project selection"""
+        project = item.data(Qt.UserRole)
+        self.project_selected.emit(project)
 
-    def on_mode_change(self, mode_text):
-        self._update_placeholder_text()
 
-    def on_fetch(self):
-        query_or_path = self.url_input.text().strip()
-        # Determine mode based on ComboBox text, could also use index or data
-        mode_text = self.mode_combo.currentText()
+class ProjectDialog(QDialog):
+    """Project creation dialog"""
 
-        if not query_or_path:
-            self.status_label.setText("Please enter a query, URL, or config file path.")
-            return
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("New Project")
+        self.setModal(True)
+        self.resize(500, 400)
+        self.init_ui()
 
-        # Clear previous results
-        self.complete_enriched_items_cache = []
-        self.preview_display_strings = []
-        if hasattr(self.logger, 'enhanced_snippet_data'):  # Reset logger's cache too if it exists
-            self.logger.enhanced_snippet_data = []
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
 
-        self.fetch_button.setEnabled(False)
-        self.save_button.setEnabled(False)
-        # self.rag_export_button.setEnabled(False) # It's informational
+        self.name_input = QLineEdit()
+        self.description_input = QTextEdit()
+        self.description_input.setMaximumHeight(80)
 
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        self.status_label.setText(f"Initializing processing for: {query_or_path}...")
-        self.snippets_edit.setPlainText("")
-        self.analysis_edit.setHtml("")
-        self.insights_text.setHtml("")
+        self.domain_combo = QComboBox()
+        self.domain_combo.setEditable(True)
+        self.domain_combo.addItems([
+            "sports", "finance", "legal", "medical", "e-commerce",
+            "real-estate", "news", "research", "education", "technology"
+        ])
 
-        # Pass the actual value ('html', 'pdf', 'auto') from content_type_combo.currentData()
-        gui_content_type_hint = self.content_type_combo.currentData()
+        self.websites_input = QTextEdit()
+        self.websites_input.setPlaceholderText("Enter target websites, one per line")
+        self.websites_input.setMaximumHeight(100)
 
-        self.fetch_worker = FetchWorker(query_or_path, mode_text, gui_content_type_hint, self.logger)
-        self.fetch_worker.progress.connect(self.update_fetch_progress)
-        self.fetch_worker.finished.connect(self.handle_fetch_finished)
-        self.fetch_worker.error.connect(self.handle_fetch_error)
-        self.fetch_worker.start()
+        form_layout.addRow("Project Name:", self.name_input)
+        form_layout.addRow("Description:", self.description_input)
+        form_layout.addRow("Domain:", self.domain_combo)
+        form_layout.addRow("Target Websites:", self.websites_input)
 
-    def update_fetch_progress(self, value, message):
-        self.progress_bar.setValue(value)
-        self.status_label.setText(message)
+        button_layout = QHBoxLayout()
+        self.ok_btn = QPushButton("Create Project")
+        self.ok_btn.setProperty("class", "success")
+        self.cancel_btn = QPushButton("Cancel")
 
-    # MODIFIED: Receives List[EnrichedItem]
-    def handle_fetch_finished(self, enriched_items: List[EnrichedItem], status_message: str):
-        self.complete_enriched_items_cache = enriched_items
+        button_layout.addStretch()
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.ok_btn)
 
-        # Generate preview strings for the GUI display
-        self.preview_display_strings = []
-        for item in self.complete_enriched_items_cache:
-            preview = f"Title: {item.title}\nSource: {item.source_url}\n\n"
-            if item.primary_text_content:
-                preview += item.primary_text_content[:800] + ("..." if len(item.primary_text_content) > 800 else "")
-            else:
-                preview += "(No primary text content)"
+        layout.addLayout(form_layout)
+        layout.addLayout(button_layout)
 
-            if item.enriched_structured_elements:
-                preview += f"\n\n--- ({len(item.enriched_structured_elements)} structured elements found) ---"
-                # Optionally list types of structured elements
-                # for elem in item.enriched_structured_elements[:3]:
-                #    preview += f"\n  - Type: {elem.get('type', 'unknown')}, Content Snippet: {str(elem.get('content'))[:50]}..."
-            self.preview_display_strings.append(preview)
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
 
-        display_text_for_preview_tab = "\n\n==============================\n\n".join(self.preview_display_strings)
-        if not display_text_for_preview_tab and self.url_input.text():  # Check if input was given
-            display_text_for_preview_tab = f"No content processed or found for '{self.url_input.text()}'."
-        elif not display_text_for_preview_tab:
-            display_text_for_preview_tab = "No content processed."
+    def get_project_config(self) -> ProjectConfig:
+        """Get project configuration"""
+        websites = [line.strip() for line in self.websites_input.toPlainText().split('\n') if line.strip()]
 
-        self.snippets_edit.setPlainText(display_text_for_preview_tab)
-        self._display_analysis_summary()  # Update analysis tab based on enriched_items
-
-        self.status_label.setText(status_message)
-        self.fetch_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-
-        if self.complete_enriched_items_cache:  # Enable save if there are items
-            self.save_button.setEnabled(True)
-        # RAG export info button is always enabled if present
-
-    def _display_analysis_summary(self):
-        # Uses self.complete_enriched_items_cache now
-        if not self.complete_enriched_items_cache:
-            self.analysis_edit.setHtml("<p>No items processed or no metadata to display.</p>")
-            return
-
-        summary_html = f"<h3>Overall Processing Summary</h3>"
-        summary_html += f"<p><b>Input:</b> {self.url_input.text()}</p>"
-        summary_html += f"<p><b>Content Type Hint (GUI):</b> {self.content_type_combo.currentText()}</p>"
-        summary_html += f"<p><b>Total Processed Items (displaying summary):</b> {len(self.complete_enriched_items_cache)}</p>"
-        summary_html += "<hr>"
-
-        for idx, item in enumerate(self.complete_enriched_items_cache):
-            summary_html += f"<h4>Item {idx + 1}: {item.title}</h4>"
-            summary_html += f"<ul>"
-            summary_html += f"<li><b>Source URL:</b> <a href='{item.source_url}'>{item.source_url}</a></li>"
-            summary_html += f"<li><b>Source Type (Hint):</b> {item.source_type}</li>"
-            summary_html += f"<li><b>Language (Primary Text):</b> {item.language_of_primary_text or 'N/A'}</li>"
-            summary_html += f"<li><b>Categories:</b> {', '.join(item.categories) or 'N/A'}</li>"
-            summary_html += f"<li><b>Tags:</b> {', '.join(item.tags[:10]) if item.tags else 'N/A'}</li>"  # Show some tags
-            summary_html += f"<li><b>Overall Entities Count:</b> {len(item.overall_entities)}</li>"
-            summary_html += f"<li><b>Structured Elements Count:</b> {len(item.enriched_structured_elements)}</li>"
-
-            # Display types of structured elements found
-            if item.enriched_structured_elements:
-                elem_types = [elem.get('type', 'unknown') for elem in item.enriched_structured_elements]
-                elem_type_counts = {t: elem_types.count(t) for t in set(elem_types)}
-                summary_html += "<li><b>Structured Element Types:</b><ul>"
-                for elem_type, count in elem_type_counts.items():
-                    summary_html += f"<li>{elem_type}: {count}</li>"
-                summary_html += "</ul></li>"
-
-            # Display a snippet of the metadata_summary for quick glance
-            if item.displayable_metadata_summary:
-                summary_html += f"<li><b>Quick Metadata Summary:</b><pre>{json.dumps(item.displayable_metadata_summary, indent=2)}</pre></li>"
-            summary_html += f"</ul><br>"
-
-        self.analysis_edit.setHtml(summary_html)
-        # self.insights_text can be used for more detailed view of a selected item from analysis_edit in future
-        # For now, it might just show the same summary or a part of it.
-        self.insights_text.setHtml(
-            f"<h3>Overall Summary Duplicated</h3> <p>See 'Analysis & Metadata' Tab for full details. Item-specific selection not yet implemented.</p>" + summary_html if len(
-                summary_html) < 2000 else "Summary too long for this view, see Analysis tab.")
-
-    def handle_fetch_error(self, error_message):
-        self.logger.error(f"GUI received fetch error: {error_message}")
-        self.snippets_edit.setPlainText(f"An error occurred during processing:\n\n{error_message}")
-        self.status_label.setText("Error during processing. Check logs.")
-        self.fetch_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.save_button.setEnabled(False)
-
-    # RENAMED and MODIFIED: on_save_processed_content
-    def on_save_processed_content(self):
-        if not self.complete_enriched_items_cache:
-            self.status_label.setText("No processed content available to save.")
-            return
-
-        # Suggest a directory name based on the query/input
-        raw_query_text = self.url_input.text().strip()
-        # Sanitize query_text to be part of a directory name
-        # Replace non-alphanumeric (excluding _, -) with underscore, then take first 30 chars
-        sanitized_query_for_dirname = "".join(
-            c if c.isalnum() else "_" for c in raw_query_text if c.isalnum() or c in [' ', '_', '-']).strip().replace(
-            ' ', '_')
-        suggested_dirname_base = f"processed_{sanitized_query_for_dirname[:30]}" if sanitized_query_for_dirname else "processed_content"
-
-        # Allow user to select a base directory for all outputs
-        # The saver will create a subfolder within this for this specific save operation.
-        base_save_directory = QFileDialog.getExistingDirectory(self, "Select Base Directory to Save Processed Content")
-        if not base_save_directory:
-            self.status_label.setText("Save cancelled.")
-            return
-
-        self.save_worker = SaveWorker(
-            self.complete_enriched_items_cache,
-            base_save_directory,
-            suggested_dirname_base,
-            # This will be used by saver to create a sub-folder like "base_save_directory/suggested_dirname_base"
-            self.logger
+        return ProjectConfig(
+            id=f"project_{uuid.uuid4().hex[:8]}",
+            name=self.name_input.text(),
+            description=self.description_input.toPlainText(),
+            domain=self.domain_combo.currentText(),
+            target_websites=websites,
+            scraping_rules=[],
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat()
         )
-        self.save_worker.finished.connect(self.handle_save_finished)
-        self.save_worker.error.connect(self.handle_save_error)
 
-        # Disable buttons during save
-        self.save_button.setEnabled(False)
-        self.fetch_button.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress for save
-        self.status_label.setText(f"Saving {len(self.complete_enriched_items_cache)} processed items...")
-        self.save_worker.start()
 
-    def handle_save_finished(self, status_message):
-        self.status_label.setText(status_message)
-        self.save_button.setEnabled(True)  # Re-enable after save
-        self.fetch_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setRange(0, 100)  # Reset progress bar
+class RulesManager(QWidget):
+    """Manage scraping rules with edit/delete functionality"""
 
-    def handle_save_error(self, error_message):
-        self.status_label.setText(f"Save Error: {error_message}. Check logs.")
-        self.save_button.setEnabled(True)
-        self.fetch_button.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setRange(0, 100)
+    rule_updated = Signal(ScrapingRule)
+    rule_deleted = Signal(str)  # rule_id
 
-    # RENAMED: on_rag_export_info (was on_rag_export)
-    def on_rag_export_info(self):
-        self.logger.info(f"GUI RAG Export Info button clicked.")
-        # This is informational, actual export happens in backend.
-        # Format selection combo was removed as it's backend-controlled now.
-        self.status_label.setText(
-            f"INFO: RAG Chunks (e.g., JSONL, Markdown) are exported by the backend pipeline based on run configuration."
+    def __init__(self):
+        super().__init__()
+        self.current_rules = []
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        header = QLabel("📋 Scraping Rules")
+        header.setFont(QFont("Arial", 14, QFont.Bold))
+        header.setStyleSheet("color: #4CAF50; margin: 10px 0;")
+
+        self.rules_table = QTableWidget()
+        self.rules_table.setColumnCount(3)
+        self.rules_table.setHorizontalHeaderLabels(["Name", "Type", "Selector"])
+        self.rules_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+
+        # Rule actions
+        rule_actions_layout = QHBoxLayout()
+        self.edit_rule_btn = QPushButton("✏️ Edit Rule")
+        self.delete_rule_btn = QPushButton("🗑️ Delete Rule")
+        self.edit_rule_btn.setEnabled(False)
+        self.delete_rule_btn.setEnabled(False)
+
+        rule_actions_layout.addWidget(self.edit_rule_btn)
+        rule_actions_layout.addWidget(self.delete_rule_btn)
+        rule_actions_layout.addStretch()
+
+        # Export actions
+        export_actions_layout = QHBoxLayout()
+        self.test_all_btn = QPushButton("🧪 Test All")
+        self.export_btn = QPushButton("💾 Export Config")
+        self.run_scrape_btn = QPushButton("🚀 Run Scraper")
+        self.run_scrape_btn.setProperty("class", "success")
+
+        export_actions_layout.addWidget(self.test_all_btn)
+        export_actions_layout.addWidget(self.export_btn)
+        export_actions_layout.addStretch()
+        export_actions_layout.addWidget(self.run_scrape_btn)
+
+        layout.addWidget(header)
+        layout.addWidget(self.rules_table)
+        layout.addLayout(rule_actions_layout)
+        layout.addLayout(export_actions_layout)
+
+        # Connect signals
+        self.rules_table.selectionModel().selectionChanged.connect(self.on_rule_selected)
+        self.edit_rule_btn.clicked.connect(self.edit_selected_rule)
+        self.delete_rule_btn.clicked.connect(self.delete_selected_rule)
+        self.export_btn.clicked.connect(self.export_config)
+
+    def on_rule_selected(self):
+        """Handle rule selection"""
+        selected_rows = self.rules_table.selectionModel().selectedRows()
+        has_selection = len(selected_rows) > 0
+        self.edit_rule_btn.setEnabled(has_selection)
+        self.delete_rule_btn.setEnabled(has_selection)
+
+    def edit_selected_rule(self):
+        """Edit the selected rule"""
+        selected_rows = self.rules_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        row = selected_rows[0].row()
+        if 0 <= row < len(self.current_rules):
+            rule = self.current_rules[row]
+            dialog = RuleEditDialog(rule, self)
+            if dialog.exec() == QDialog.Accepted:
+                updated_rule = dialog.get_updated_rule()
+                self.current_rules[row] = updated_rule
+                self.refresh_rules_table()
+                self.rule_updated.emit(updated_rule)
+
+                # Update in parent project
+                main_window = self.window()
+                if hasattr(main_window, 'current_project') and main_window.current_project:
+                    for i, project_rule in enumerate(main_window.current_project.scraping_rules):
+                        if project_rule.id == updated_rule.id:
+                            main_window.current_project.scraping_rules[i] = updated_rule
+                            break
+
+    def delete_selected_rule(self):
+        """Delete the selected rule"""
+        selected_rows = self.rules_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        row = selected_rows[0].row()
+        if 0 <= row < len(self.current_rules):
+            rule = self.current_rules[row]
+
+            reply = QMessageBox.question(self, "Delete Rule",
+                                         f"Are you sure you want to delete the rule '{rule.name}'?",
+                                         QMessageBox.Yes | QMessageBox.No)
+
+            if reply == QMessageBox.Yes:
+                removed_rule = self.current_rules.pop(row)
+                self.refresh_rules_table()
+                self.rule_deleted.emit(removed_rule.id)
+
+                # Remove from parent project
+                main_window = self.window()
+                if hasattr(main_window, 'current_project') and main_window.current_project:
+                    main_window.current_project.scraping_rules = [
+                        r for r in main_window.current_project.scraping_rules
+                        if r.id != removed_rule.id
+                    ]
+
+    def add_rule(self, rule: ScrapingRule):
+        """Add rule to display"""
+        self.current_rules.append(rule)
+        self.refresh_rules_table()
+
+    def refresh_rules_table(self):
+        """Refresh rules table"""
+        self.rules_table.setRowCount(len(self.current_rules))
+
+        for row, rule in enumerate(self.current_rules):
+            self.rules_table.setItem(row, 0, QTableWidgetItem(rule.name))
+            self.rules_table.setItem(row, 1, QTableWidgetItem(rule.extract_type))
+            self.rules_table.setItem(row, 2, QTableWidgetItem(rule.selector[:50] + "..."))
+
+        self.rules_table.resizeColumnsToContents()
+
+    def export_config(self):
+        """Export configuration for your scraping tool"""
+        if not self.current_rules:
+            QMessageBox.warning(self, "No Rules", "Please create some scraping rules first.")
+            return
+
+        # Get the parent window to access project info
+        main_window = self.window()
+        if not hasattr(main_window, 'current_project') or not main_window.current_project:
+            QMessageBox.warning(self, "No Project", "Please select a project first.")
+            return
+
+        project = main_window.current_project
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Scraper Config",
+            f"{project.name.lower().replace(' ', '_')}_config.yaml",
+            "YAML files (*.yaml *.yml)"
         )
-        self.logger.info(f"To customize RAG export, modify Exporter or use YAML configuration for export path/format.")
 
-    def closeEvent(self, event):
-        # Gracefully stop threads if running
-        if hasattr(self, 'fetch_worker') and self.fetch_worker.isRunning():
-            self.logger.info("Attempting to stop fetch worker on close...")
-            self.fetch_worker.quit()  # Request termination
-            if not self.fetch_worker.wait(3000):  # Wait up to 3 seconds
-                self.logger.warning("Fetch worker did not stop gracefully, terminating.")
-                self.fetch_worker.terminate()  # Force terminate
-                self.fetch_worker.wait()  # Wait for termination
+        if filename:
+            # Format EXACTLY like your backend expects
+            config_data = {
+                "domain_info": {
+                    "name": project.name,
+                    "description": project.description,
+                    "domain": project.domain
+                },
+                "sources": [{
+                    "name": project.name.lower().replace(' ', '_'),
+                    "seeds": project.target_websites,
+                    "source_type": project.domain,
+                    "selectors": {
+                        "custom_fields": [
+                            {
+                                "name": rule.name,
+                                "selector": rule.selector,
+                                "extract_type": rule.extract_type,
+                                "attribute_name": rule.attribute_name,
+                                "is_list": rule.is_list,
+                                "required": rule.required
+                            } for rule in self.current_rules
+                        ]
+                    },
+                    "crawl": {
+                        "depth": 1,
+                        "delay_seconds": 2.0,
+                        "respect_robots_txt": True
+                    },
+                    "export": {
+                        "format": "jsonl",
+                        "output_path": f"./data_exports/{project.domain}/{project.name.lower().replace(' ', '_')}.jsonl"
+                    }
+                }]
+            }
 
-        if hasattr(self, 'save_worker') and self.save_worker.isRunning():
-            self.logger.info("Attempting to stop save worker on close...")
-            self.save_worker.quit()
-            if not self.save_worker.wait(3000):
-                self.logger.warning("Save worker did not stop gracefully, terminating.")
-                self.save_worker.terminate()
-                self.save_worker.wait()
-        event.accept()
+            import yaml
+            with open(filename, 'w') as f:
+                yaml.dump(config_data, f, default_flow_style=False, indent=2)
+
+            QMessageBox.information(self, "Export Complete",
+                                    f"Scraper config exported to {filename}\n\n"
+                                    f"Run with: python main.py --mode backend\n"
+                                    f"Then load: {filename}")
 
 
-if __name__ == '__main__':
-    # This block is for running the GUI directly for testing.
-    # In production, main.py would typically be the entry point.
+class RAGDataStudio(QMainWindow):
+    """Main application window"""
+
+    def __init__(self):
+        super().__init__()
+        self.current_project = None
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("RAG Data Studio - Visual Scraper Builder")
+        self.setGeometry(100, 100, 1600, 1000)
+        self.setStyleSheet(DARK_THEME)
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        main_layout = QHBoxLayout(central_widget)
+        main_splitter = QSplitter(Qt.Horizontal)
+
+        # Left panel - Projects
+        self.project_manager = ProjectManager()
+        self.project_manager.setMaximumWidth(300)
+        main_splitter.addWidget(self.project_manager)
+
+        # Center panel - Browser
+        center_widget = QWidget()
+        center_layout = QVBoxLayout(center_widget)
+
+        # Browser toolbar
+        toolbar_layout = QHBoxLayout()
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("Enter URL to analyze...")
+
+        self.load_btn = QPushButton("🌐 Load")
+        self.selector_btn = QPushButton("🎯 Target Elements")
+        self.selector_btn.setProperty("class", "success")
+
+        toolbar_layout.addWidget(QLabel("URL:"))
+        toolbar_layout.addWidget(self.url_input)
+        toolbar_layout.addWidget(self.load_btn)
+        toolbar_layout.addWidget(self.selector_btn)
+
+        self.browser = InteractiveBrowser()
+
+        center_layout.addLayout(toolbar_layout)
+        center_layout.addWidget(self.browser)
+        main_splitter.addWidget(center_widget)
+
+        # Right panel - Targeting and rules
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+
+        self.element_targeter = VisualElementTargeter()
+        self.rules_manager = RulesManager()
+
+        right_splitter = QSplitter(Qt.Vertical)
+        right_splitter.addWidget(self.element_targeter)
+        right_splitter.addWidget(self.rules_manager)
+        right_splitter.setSizes([400, 300])
+
+        right_layout.addWidget(right_splitter)
+        right_widget.setMaximumWidth(450)
+        main_splitter.addWidget(right_widget)
+
+        main_splitter.setSizes([280, 870, 450])
+        main_layout.addWidget(main_splitter)
+
+        # Status bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready - Create a project and start building scrapers")
+
+        # Connect signals
+        self.load_btn.clicked.connect(self.load_page)
+        self.selector_btn.clicked.connect(self.toggle_selector_mode)
+        self.project_manager.project_selected.connect(self.load_project)
+        self.element_targeter.rule_created.connect(self.add_rule_to_project)
+        self.browser.set_targeting_widget(self.element_targeter)
+
+    def load_page(self):
+        """Load page in browser"""
+        url = self.url_input.text().strip()
+        if url:
+            if not url.startswith(('http://', 'https://')):
+                url = 'https://' + url
+            self.browser.load(QUrl(url))
+            self.status_bar.showMessage(f"Loading: {url}")
+
+    def toggle_selector_mode(self):
+        """Toggle visual element targeting mode"""
+        if self.selector_btn.text() == "🎯 Target Elements":
+            self.browser.enable_selector_mode()
+            self.selector_btn.setText("❌ Stop Targeting")
+            self.selector_btn.setProperty("class", "")
+            self.selector_btn.style().unpolish(self.selector_btn)
+            self.selector_btn.style().polish(self.selector_btn)
+            self.status_bar.showMessage("🎯 Targeting mode enabled - Click elements to create scraping rules")
+        else:
+            self.browser.disable_selector_mode()
+            self.selector_btn.setText("🎯 Target Elements")
+            self.selector_btn.setProperty("class", "success")
+            self.selector_btn.style().unpolish(self.selector_btn)
+            self.selector_btn.style().polish(self.selector_btn)
+            self.status_bar.showMessage("Targeting mode disabled")
+
+    def load_project(self, project: ProjectConfig):
+        """Load selected project"""
+        self.current_project = project
+        self.rules_manager.current_rules = project.scraping_rules.copy()
+        self.rules_manager.refresh_rules_table()
+
+        if project.target_websites:
+            self.url_input.setText(project.target_websites[0])
+
+        self.status_bar.showMessage(f"Loaded project: {project.name} ({len(project.scraping_rules)} rules)")
+
+    def add_rule_to_project(self, rule: ScrapingRule):
+        """Add new rule to current project"""
+        if not self.current_project:
+            QMessageBox.warning(self, "No Project", "Please select or create a project first.")
+            return
+
+        self.current_project.scraping_rules.append(rule)
+        self.current_project.updated_at = datetime.now().isoformat()
+
+        self.rules_manager.add_rule(rule)
+        self.status_bar.showMessage(f"Added rule: {rule.name}")
+
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
-    # Ensure a basic logger is set up if running this file directly
-    if not logging.getLogger(config.APP_NAME).handlers:
-        main_gui_logger = setup_logger(name=config.APP_NAME, log_file="gui_direct_run.log")
-        main_gui_logger.info("Running EnhancedMainWindow directly for testing.")
+    app.setApplicationName("RAG Data Studio")
+    app.setStyle("Fusion")
 
-    window = EnhancedMainWindow()
+    window = RAGDataStudio()
     window.show()
+
     sys.exit(app.exec())

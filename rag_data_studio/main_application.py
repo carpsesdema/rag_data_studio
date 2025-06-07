@@ -1,7 +1,7 @@
 # rag_data_studio/main_application.py
 """
-RAG Data Studio - ACTUALLY WORKING VERSION
-Simple element targeting that doesn't rely on broken Qt WebChannel
+RAG Data Studio - Clean & Simple Visual Scraper Builder
+Apple-style simplicity, wired to your backend scraper
 """
 
 import sys
@@ -168,45 +168,125 @@ QSplitter::handle {
 
 @dataclass
 class ScrapingRule:
-    """Professional scraping rule with semantic labeling for RAG"""
+    """Simple scraping rule - matches your backend exactly"""
     id: str
     name: str
     description: str
     selector: str
-    extraction_type: str = "text"
-    semantic_label: str = "content"
-    rag_importance: str = "medium"
+    extract_type: str = "text"
     attribute_name: Optional[str] = None
     is_list: bool = False
-    data_type: str = "string"
-    validation_regex: Optional[str] = None
-    transformation: Optional[str] = None
     required: bool = False
-    examples: List[str] = None
-
-    def __post_init__(self):
-        if self.examples is None:
-            self.examples = []
 
 
 @dataclass
 class ProjectConfig:
-    """Professional project configuration"""
+    """Simple project configuration"""
     id: str
     name: str
     description: str
     domain: str
     target_websites: List[str]
     scraping_rules: List[ScrapingRule]
-    output_settings: Dict[str, Any]
-    rate_limiting: Dict[str, Any]
     created_at: str
     updated_at: str
-    client_info: Optional[Dict[str, str]] = None
+
+
+class RuleEditDialog(QDialog):
+    """Dialog for editing scraping rules"""
+
+    def __init__(self, rule: ScrapingRule, parent=None):
+        super().__init__(parent)
+        self.rule = rule
+        self.setWindowTitle(f"Edit Rule: {rule.name}")
+        self.setModal(True)
+        self.resize(500, 400)
+        self.init_ui()
+        self.load_rule_data()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Form
+        form_layout = QFormLayout()
+
+        self.name_input = QLineEdit()
+        self.description_input = QLineEdit()
+        self.selector_input = QLineEdit()
+
+        self.extract_type_combo = QComboBox()
+        self.extract_type_combo.addItems(["text", "attribute", "html"])
+
+        self.attribute_input = QLineEdit()
+        self.attribute_input.setPlaceholderText("e.g., href, src, data-value")
+
+        self.is_list_check = QCheckBox("Extract as list")
+        self.required_check = QCheckBox("Required field")
+
+        form_layout.addRow("Name:", self.name_input)
+        form_layout.addRow("Description:", self.description_input)
+        form_layout.addRow("Selector:", self.selector_input)
+        form_layout.addRow("Extract Type:", self.extract_type_combo)
+        form_layout.addRow("Attribute Name:", self.attribute_input)
+        form_layout.addRow("", self.is_list_check)
+        form_layout.addRow("", self.required_check)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.save_btn = QPushButton("💾 Save Changes")
+        self.save_btn.setProperty("class", "success")
+        self.cancel_btn = QPushButton("Cancel")
+
+        button_layout.addStretch()
+        button_layout.addWidget(self.cancel_btn)
+        button_layout.addWidget(self.save_btn)
+
+        layout.addLayout(form_layout)
+        layout.addLayout(button_layout)
+
+        # Connect signals
+        self.save_btn.clicked.connect(self.save_changes)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.extract_type_combo.currentTextChanged.connect(self.on_extract_type_changed)
+
+    def load_rule_data(self):
+        """Load current rule data into form"""
+        self.name_input.setText(self.rule.name)
+        self.description_input.setText(self.rule.description)
+        self.selector_input.setText(self.rule.selector)
+        self.extract_type_combo.setCurrentText(self.rule.extract_type)
+        self.attribute_input.setText(self.rule.attribute_name or "")
+        self.is_list_check.setChecked(self.rule.is_list)
+        self.required_check.setChecked(self.rule.required)
+        self.on_extract_type_changed(self.rule.extract_type)
+
+    def on_extract_type_changed(self, extract_type):
+        """Enable/disable attribute field"""
+        self.attribute_input.setEnabled(extract_type == "attribute")
+
+    def save_changes(self):
+        """Save changes to rule"""
+        if not self.name_input.text().strip():
+            QMessageBox.warning(self, "Missing Name", "Please provide a rule name.")
+            return
+
+        self.rule.name = self.name_input.text().strip()
+        self.rule.description = self.description_input.text().strip()
+        self.rule.selector = self.selector_input.text().strip()
+        self.rule.extract_type = self.extract_type_combo.currentText()
+        self.rule.attribute_name = self.attribute_input.text().strip() if self.attribute_input.isEnabled() else None
+        self.rule.is_list = self.is_list_check.isChecked()
+        self.rule.required = self.required_check.isChecked()
+
+        self.accept()
+
+    def get_updated_rule(self) -> ScrapingRule:
+        """Get the updated rule"""
+        return self.rule
 
 
 class VisualElementTargeter(QWidget):
-    """Visual element targeting widget"""
+    """Clean, simple element targeting - Apple-style"""
 
     rule_created = Signal(ScrapingRule)
 
@@ -221,11 +301,11 @@ class VisualElementTargeter(QWidget):
         layout = QVBoxLayout(self)
 
         # Header
-        header = QLabel("🎯 Visual Element Targeting")
+        header = QLabel("🎯 Smart Element Targeting")
         header.setFont(QFont("Arial", 14, QFont.Bold))
         header.setStyleSheet("color: #4CAF50; margin: 10px 0;")
 
-        # Current selection display
+        # Current selection
         selection_group = QGroupBox("Current Selection")
         selection_layout = QFormLayout(selection_group)
 
@@ -237,61 +317,45 @@ class VisualElementTargeter(QWidget):
         self.element_text_display.setReadOnly(True)
         self.element_text_display.setMaximumHeight(60)
 
+        self.smart_suggestions = QLabel()
+        self.smart_suggestions.setStyleSheet("color: #4CAF50; font-weight: bold; padding: 5px;")
+        self.smart_suggestions.setWordWrap(True)
+
         selection_layout.addRow("CSS Selector:", self.selector_display)
         selection_layout.addRow("Element Text:", self.element_text_display)
+        selection_layout.addRow("AI Suggestion:", self.smart_suggestions)
 
-        # Semantic labeling for RAG
-        semantic_group = QGroupBox("🧠 RAG Semantic Labeling")
-        semantic_layout = QFormLayout(semantic_group)
+        # Simple field definition
+        field_group = QGroupBox("🏷️ Field Definition")
+        field_layout = QFormLayout(field_group)
 
         self.field_name_input = QLineEdit()
-        self.field_name_input.setPlaceholderText("e.g., player_name, ranking_position, match_score")
+        self.field_name_input.setPlaceholderText("e.g., player_name, ranking_position")
 
-        self.semantic_label_combo = QComboBox()
-        self.semantic_label_combo.setEditable(True)
-        self.semantic_label_combo.addItems([
-            "entity_name", "entity_ranking", "entity_score", "entity_stats",
-            "entity_description", "entity_category", "entity_location",
-            "entity_date", "entity_value", "entity_metadata", "content_title",
-            "content_body", "content_summary", "data_metric", "data_timestamp"
-        ])
+        self.field_description = QLineEdit()
+        self.field_description.setPlaceholderText("Brief description...")
 
-        self.rag_importance_combo = QComboBox()
-        self.rag_importance_combo.addItems(["low", "medium", "high", "critical"])
-        self.rag_importance_combo.setCurrentText("medium")
+        field_layout.addRow("Field Name:", self.field_name_input)
+        field_layout.addRow("Description:", self.field_description)
 
-        self.field_description = QTextEdit()
-        self.field_description.setMaximumHeight(60)
-        self.field_description.setPlaceholderText("Brief description for RAG context...")
+        # Smart actions
+        pattern_group = QGroupBox("🔍 Smart Actions")
+        pattern_layout = QVBoxLayout(pattern_group)
 
-        semantic_layout.addRow("Field Name:", self.field_name_input)
-        semantic_layout.addRow("Semantic Label:", self.semantic_label_combo)
-        semantic_layout.addRow("RAG Importance:", self.rag_importance_combo)
-        semantic_layout.addRow("Description:", self.field_description)
+        self.bulk_extract_btn = QPushButton("📋 Extract All Similar Items")
+        self.bulk_extract_btn.setEnabled(False)
+        self.bulk_extract_btn.clicked.connect(self.create_bulk_extraction)
 
-        # Quick label buttons
-        quick_layout = QHBoxLayout()
-        quick_layout.addWidget(QLabel("Quick Labels:"))
+        self.container_select_btn = QPushButton("📦 Select Parent Container")
+        self.container_select_btn.setEnabled(False)
+        self.container_select_btn.clicked.connect(self.select_container)
 
-        buttons = [
-            ("Name/Title", "entity_name", "high"),
-            ("Ranking", "entity_ranking", "high"),
-            ("Score", "entity_score", "medium"),
-            ("Stats", "entity_stats", "medium"),
-            ("Metadata", "entity_metadata", "low")
-        ]
+        pattern_layout.addWidget(self.bulk_extract_btn)
+        pattern_layout.addWidget(self.container_select_btn)
 
-        for text, label, importance in buttons:
-            btn = QPushButton(text)
-            btn.setMaximumHeight(30)
-            btn.clicked.connect(lambda checked, l=label, i=importance: self.set_quick_label(l, i))
-            quick_layout.addWidget(btn)
-
-        quick_layout.addStretch()
-
-        # Advanced options
-        advanced_group = QGroupBox("Advanced Options")
-        advanced_layout = QFormLayout(advanced_group)
+        # Options
+        options_group = QGroupBox("Options")
+        options_layout = QFormLayout(options_group)
 
         self.extraction_type_combo = QComboBox()
         self.extraction_type_combo.addItems(["text", "attribute", "html"])
@@ -303,14 +367,14 @@ class VisualElementTargeter(QWidget):
         self.is_list_check = QCheckBox("Extract as list")
         self.required_check = QCheckBox("Required field")
 
-        advanced_layout.addRow("Extract Type:", self.extraction_type_combo)
-        advanced_layout.addRow("Attribute Name:", self.attribute_input)
-        advanced_layout.addRow("", self.is_list_check)
-        advanced_layout.addRow("", self.required_check)
+        options_layout.addRow("Extract Type:", self.extraction_type_combo)
+        options_layout.addRow("Attribute Name:", self.attribute_input)
+        options_layout.addRow("", self.is_list_check)
+        options_layout.addRow("", self.required_check)
 
         # Action buttons
         action_layout = QHBoxLayout()
-        self.test_btn = QPushButton("🧪 Test Selector")
+        self.test_btn = QPushButton("🧪 Test")
         self.test_btn.setEnabled(False)
 
         self.save_btn = QPushButton("💾 Save Rule")
@@ -324,9 +388,9 @@ class VisualElementTargeter(QWidget):
         # Add all components
         layout.addWidget(header)
         layout.addWidget(selection_group)
-        layout.addWidget(semantic_group)
-        layout.addLayout(quick_layout)
-        layout.addWidget(advanced_group)
+        layout.addWidget(field_group)
+        layout.addWidget(pattern_group)
+        layout.addWidget(options_group)
         layout.addLayout(action_layout)
         layout.addStretch()
 
@@ -335,23 +399,59 @@ class VisualElementTargeter(QWidget):
         self.save_btn.clicked.connect(self.save_current_rule)
         self.test_btn.clicked.connect(self.test_current_selector)
 
-    def set_quick_label(self, label: str, importance: str):
-        """Set quick semantic label and importance"""
-        self.semantic_label_combo.setCurrentText(label)
-        self.rag_importance_combo.setCurrentText(importance)
+    def detect_content_type(self, text: str, element_type: str, selector: str) -> dict:
+        """Simple content detection"""
+        text = text.strip().lower()
 
-        if not self.field_name_input.text():
-            field_name = label.replace("entity_", "").replace("content_", "")
-            self.field_name_input.setText(field_name)
+        # Name detection
+        if any(pattern in text for pattern in ['. ', ' jr', ' sr', ' iii']) or \
+                (len(text.split()) >= 2 and text.replace(' ', '').replace('.', '').isalpha()):
+            return {
+                'type': 'person_name',
+                'suggested_field': 'player_name' if 'rank' in selector else 'person_name'
+            }
 
-    def on_extraction_type_changed(self, extraction_type):
-        """Enable/disable attribute field"""
-        self.attribute_input.setEnabled(extraction_type == "attribute")
+        # Ranking detection
+        if text.isdigit() and int(text) <= 1000 and ('rank' in selector or 'position' in selector):
+            return {
+                'type': 'ranking',
+                'suggested_field': 'ranking_position'
+            }
+
+        # Score/Points detection
+        if text.replace(',', '').replace('.', '').isdigit() and len(text) >= 3:
+            return {
+                'type': 'score',
+                'suggested_field': 'points' if 'point' in selector else 'score'
+            }
+
+        # Default
+        return {
+            'type': 'text',
+            'suggested_field': 'data_field'
+        }
+
+    def detect_container_pattern(self, selector: str) -> dict:
+        """Detect if this is part of a repeating pattern"""
+        patterns = {
+            'table_row': 'tr' in selector or 'tbody' in selector,
+            'list_item': 'li' in selector or 'ul' in selector or 'ol' in selector,
+            'card': 'card' in selector or 'item' in selector,
+            'grid': 'grid' in selector or 'col' in selector
+        }
+
+        for pattern_type, detected in patterns.items():
+            if detected:
+                return {
+                    'type': pattern_type,
+                    'bulk_possible': True,
+                    'container_suggestion': f"Extract all {pattern_type.replace('_', ' ')}s"
+                }
+
+        return {'type': 'single', 'bulk_possible': False}
 
     def update_selection(self, selector: str, text: str, element_type: str):
-        """Update current selection from browser"""
-        print(f"🎯 UPDATING SELECTION: {selector}")
-
+        """Enhanced selection with smart detection"""
         self.current_selector = selector
         self.current_element_text = text
         self.current_element_type = element_type
@@ -359,18 +459,64 @@ class VisualElementTargeter(QWidget):
         self.selector_display.setText(selector)
         self.element_text_display.setText(text[:200] + "..." if len(text) > 200 else text)
 
+        # Smart content detection
+        content_info = self.detect_content_type(text, element_type, selector)
+        pattern_info = self.detect_container_pattern(selector)
+
+        # Update suggestions
+        suggestion_text = f"🧠 Detected: {content_info['type'].replace('_', ' ').title()}"
+        if pattern_info['bulk_possible']:
+            suggestion_text += f" | 📋 {pattern_info['container_suggestion']}"
+
+        self.smart_suggestions.setText(suggestion_text)
+
+        # Auto-fill fields
+        self.field_name_input.setText(content_info['suggested_field'])
+
+        # Enable buttons
         self.save_btn.setEnabled(True)
         self.test_btn.setEnabled(True)
+        self.bulk_extract_btn.setEnabled(pattern_info['bulk_possible'])
+        self.container_select_btn.setEnabled(True)
 
-        # Auto-suggest based on content
-        if not self.field_name_input.text() and text:
-            clean_text = text.lower().strip()
-            if clean_text.isdigit() and int(clean_text) < 100:
-                self.set_quick_label("entity_ranking", "high")
-            elif clean_text.isdigit():
-                self.set_quick_label("entity_score", "medium")
-            elif any(char.isalpha() for char in clean_text):
-                self.set_quick_label("entity_name", "high")
+    def create_bulk_extraction(self):
+        """Create structured list extraction for similar items"""
+        reply = QMessageBox.question(self, "Bulk Extraction",
+                                     f"Create a structured list to extract all similar items?\n\n"
+                                     f"This will capture multiple records with the same pattern.")
+
+        if reply == QMessageBox.Yes:
+            rule = ScrapingRule(
+                id=f"bulk_rule_{uuid.uuid4().hex[:8]}",
+                name=f"{self.field_name_input.text()}_list",
+                description=f"Bulk extraction of {self.field_name_input.text()} data",
+                selector=self.suggest_container_selector(),
+                extract_type="structured_list",
+                is_list=True
+            )
+
+            self.rule_created.emit(rule)
+            QMessageBox.information(self, "Bulk Rule Created",
+                                    f"Created structured list rule: {rule.name}")
+
+    def select_container(self):
+        """Select parent container of current element"""
+        container_selector = self.suggest_container_selector()
+        self.selector_display.setText(container_selector)
+        self.current_selector = container_selector
+
+    def suggest_container_selector(self) -> str:
+        """Suggest container selector based on current selection"""
+        if 'td' in self.current_selector:
+            return self.current_selector.replace('td', 'tr').split(' td')[0] + ' tr'
+        elif 'li' in self.current_selector:
+            return self.current_selector.replace('li', 'ul li').split(' li')[0] + ' li'
+        else:
+            return self.current_selector
+
+    def on_extraction_type_changed(self, extraction_type):
+        """Enable/disable attribute field"""
+        self.attribute_input.setEnabled(extraction_type == "attribute")
 
     def save_current_rule(self):
         """Save current selection as scraping rule"""
@@ -382,11 +528,9 @@ class VisualElementTargeter(QWidget):
         rule = ScrapingRule(
             id=f"rule_{uuid.uuid4().hex[:8]}",
             name=self.field_name_input.text(),
-            description=self.field_description.toPlainText() or f"Extracts {self.field_name_input.text()}",
+            description=self.field_description.text() or f"Extracts {self.field_name_input.text()}",
             selector=self.current_selector,
-            extraction_type=self.extraction_type_combo.currentText(),
-            semantic_label=self.semantic_label_combo.currentText(),
-            rag_importance=self.rag_importance_combo.currentText(),
+            extract_type=self.extraction_type_combo.currentText(),
             attribute_name=self.attribute_input.text() if self.attribute_input.isEnabled() else None,
             is_list=self.is_list_check.isChecked(),
             required=self.required_check.isChecked()
@@ -399,11 +543,12 @@ class VisualElementTargeter(QWidget):
         self.field_description.clear()
         self.selector_display.clear()
         self.element_text_display.clear()
+        self.smart_suggestions.clear()
         self.save_btn.setEnabled(False)
         self.test_btn.setEnabled(False)
+        self.bulk_extract_btn.setEnabled(False)
 
-        QMessageBox.information(self, "Rule Saved",
-                                f"RAG scraping rule '{rule.name}' saved successfully!")
+        QMessageBox.information(self, "Rule Saved", f"Saved: {rule.name}")
 
     def test_current_selector(self):
         """Test current selector"""
@@ -414,7 +559,7 @@ class VisualElementTargeter(QWidget):
 
 
 class InteractiveBrowser(QWebEngineView):
-    """Browser with WORKING element targeting - NO COMPLEX QT BULLSHIT"""
+    """Browser with smart element targeting"""
 
     element_selected = Signal(str, str, str)
 
@@ -423,6 +568,7 @@ class InteractiveBrowser(QWebEngineView):
         self.targeting_widget = None
         self.poll_timer = QTimer()
         self.poll_timer.timeout.connect(self.check_selection)
+        self.is_targeting_active = False
 
     def set_targeting_widget(self, widget):
         self.targeting_widget = widget
@@ -433,20 +579,15 @@ class InteractiveBrowser(QWebEngineView):
 
         def handle_result(result):
             if result:
-                print(f"🎯 GOT SELECTION: {result}")
                 try:
                     data = json.loads(result) if isinstance(result, str) else result
                     selector = data.get('selector', '')
                     text = data.get('text', '')
                     element_type = data.get('type', '')
 
-                    # Stop polling
                     self.poll_timer.stop()
-
-                    # Clear the selection
                     self.page().runJavaScript("window._ragSelection = null;")
 
-                    # Emit signal
                     self.element_selected.emit(selector, text, element_type)
                     if self.targeting_widget:
                         self.targeting_widget.update_selection(selector, text, element_type)
@@ -457,20 +598,28 @@ class InteractiveBrowser(QWebEngineView):
         self.page().runJavaScript(check_js, handle_result)
 
     def enable_selector_mode(self):
-        """Enable element selection mode"""
-        print("🎯 ENABLING TARGETING")
+        """Enable element selection mode with proper cleanup"""
+        if self.is_targeting_active:
+            return  # Already active, don't double-inject
+
+        self.is_targeting_active = True
 
         js_code = """
-        console.log('🎯 Starting targeting mode');
+        // Clean up any existing targeting
+        if (window._ragTargetingCleanup) {
+            window._ragTargetingCleanup();
+        }
 
-        // Clear any previous selection
+        console.log('🎯 Starting smart targeting mode');
         window._ragSelection = null;
 
         let isSelecting = true;
         let highlighted = null;
+        let overlay = null;
+        let tooltip = null;
 
         // Create overlay
-        let overlay = document.createElement('div');
+        overlay = document.createElement('div');
         overlay.style.cssText = `
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(76, 175, 80, 0.1); z-index: 999999;
@@ -479,7 +628,7 @@ class InteractiveBrowser(QWebEngineView):
         document.body.appendChild(overlay);
 
         // Create tooltip
-        let tooltip = document.createElement('div');
+        tooltip = document.createElement('div');
         tooltip.style.cssText = `
             position: fixed; top: 20px; right: 20px;
             background: #4CAF50; color: white; padding: 10px 15px;
@@ -490,86 +639,114 @@ class InteractiveBrowser(QWebEngineView):
         document.body.appendChild(tooltip);
 
         function highlight(element) {
-            // Remove previous highlight
             if (highlighted) {
                 highlighted.style.outline = '';
                 highlighted.style.backgroundColor = '';
             }
-            // Add new highlight
             element.style.outline = '3px solid #FF5722';
             element.style.backgroundColor = 'rgba(255, 87, 34, 0.1)';
             highlighted = element;
         }
 
-        function makeSelector(element) {
-            // Simple selector generation that actually works
+        function makeSmartSelector(element) {
             if (element.id) {
                 return '#' + element.id;
             }
 
             let selector = element.tagName.toLowerCase();
 
-            // Add classes if they exist
+            // For table cells, include the row context
+            if (selector === 'td') {
+                let row = element.closest('tr');
+                if (row) {
+                    let cellIndex = Array.from(row.children).indexOf(element);
+                    selector = `tr td:nth-child(${cellIndex + 1})`;
+                }
+            }
+
+            // For list items
+            if (selector === 'li') {
+                let list = element.closest('ul, ol');
+                if (list) {
+                    selector = `${list.tagName.toLowerCase()} li`;
+                }
+            }
+
+            // Add specific classes if they exist
             if (element.className && element.className.trim()) {
-                let classes = element.className.trim().split(/\\s+/).slice(0, 2);
-                selector += '.' + classes.join('.');
+                let classes = element.className.trim().split(/\\s+/)
+                    .filter(cls => !['active', 'selected', 'hover', 'focus'].includes(cls))
+                    .slice(0, 2);
+                if (classes.length > 0) {
+                    selector += '.' + classes.join('.');
+                }
             }
 
             return selector;
         }
 
-        // Add event listeners
-        document.addEventListener('mouseover', function(e) {
+        // Event handlers
+        function handleMouseOver(e) {
             if (isSelecting) {
                 e.preventDefault();
                 e.stopPropagation();
                 highlight(e.target);
             }
-        }, true);
+        }
 
-        document.addEventListener('click', function(e) {
+        function handleClick(e) {
             if (isSelecting) {
-                console.log('🎯 Element clicked:', e.target);
                 e.preventDefault();
                 e.stopPropagation();
 
-                let selector = makeSelector(e.target);
+                let selector = makeSmartSelector(e.target);
                 let text = e.target.textContent.trim();
                 let elementType = e.target.tagName.toLowerCase();
 
-                console.log('🎯 Generated selector:', selector);
-                console.log('🎯 Element text:', text.substring(0, 50));
-
-                // Store selection data
                 window._ragSelection = JSON.stringify({
                     selector: selector,
                     text: text,
                     type: elementType
                 });
 
-                // Clean up
-                isSelecting = false;
-                if (highlighted) {
-                    highlighted.style.outline = '';
-                    highlighted.style.backgroundColor = '';
-                }
-                overlay.remove();
-                tooltip.remove();
-
-                console.log('🎯 Selection stored');
+                cleanup();
             }
-        }, true);
+        }
 
-        console.log('🎯 Event listeners attached');
+        function cleanup() {
+            isSelecting = false;
+            if (highlighted) {
+                highlighted.style.outline = '';
+                highlighted.style.backgroundColor = '';
+            }
+            if (overlay) overlay.remove();
+            if (tooltip) tooltip.remove();
+
+            document.removeEventListener('mouseover', handleMouseOver, true);
+            document.removeEventListener('click', handleClick, true);
+        }
+
+        // Store cleanup function globally
+        window._ragTargetingCleanup = cleanup;
+
+        // Add event listeners
+        document.addEventListener('mouseover', handleMouseOver, true);
+        document.addEventListener('click', handleClick, true);
         """
 
         self.page().runJavaScript(js_code)
-        self.poll_timer.start(500)  # Check every 500ms
+        self.poll_timer.start(500)
 
     def disable_selector_mode(self):
         """Disable targeting mode"""
+        self.is_targeting_active = False
         self.poll_timer.stop()
-        cleanup_js = "window._ragSelection = null;"
+        cleanup_js = """
+        if (window._ragTargetingCleanup) {
+            window._ragTargetingCleanup();
+        }
+        window._ragSelection = null;
+        """
         self.page().runJavaScript(cleanup_js)
 
 
@@ -586,16 +763,13 @@ class ProjectManager(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Header
         header = QLabel("📁 Projects")
         header.setFont(QFont("Arial", 14, QFont.Bold))
         header.setStyleSheet("color: #4CAF50; margin: 10px 0;")
 
-        # Project list
         self.project_list = QListWidget()
         self.project_list.itemClicked.connect(self.on_project_selected)
 
-        # Actions
         actions_layout = QHBoxLayout()
         self.new_btn = QPushButton("➕ New")
         self.edit_btn = QPushButton("✏️ Edit")
@@ -605,12 +779,10 @@ class ProjectManager(QWidget):
             btn.setMaximumHeight(35)
             actions_layout.addWidget(btn)
 
-        # Add components
         layout.addWidget(header)
         layout.addWidget(self.project_list)
         layout.addLayout(actions_layout)
 
-        # Connect signals
         self.new_btn.clicked.connect(self.create_new_project)
 
     def create_new_project(self):
@@ -636,7 +808,7 @@ class ProjectManager(QWidget):
 
 
 class ProjectDialog(QDialog):
-    """Project creation dialog"""
+    """Project creation dialog - FIXED VERSION"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -647,8 +819,6 @@ class ProjectDialog(QDialog):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-
-        # Form
         form_layout = QFormLayout()
 
         self.name_input = QLineEdit()
@@ -671,7 +841,6 @@ class ProjectDialog(QDialog):
         form_layout.addRow("Domain:", self.domain_combo)
         form_layout.addRow("Target Websites:", self.websites_input)
 
-        # Buttons
         button_layout = QHBoxLayout()
         self.ok_btn = QPushButton("Create Project")
         self.ok_btn.setProperty("class", "success")
@@ -684,9 +853,21 @@ class ProjectDialog(QDialog):
         layout.addLayout(form_layout)
         layout.addLayout(button_layout)
 
-        # Connect signals
-        self.ok_btn.clicked.connect(self.accept)
+        # FIXED: Connect signals properly
+        self.ok_btn.clicked.connect(self.validate_and_accept)
         self.cancel_btn.clicked.connect(self.reject)
+
+    def validate_and_accept(self):
+        """Validate form before accepting"""
+        if not self.name_input.text().strip():
+            QMessageBox.warning(self, "Missing Name", "Please enter a project name.")
+            return
+
+        if not self.websites_input.toPlainText().strip():
+            QMessageBox.warning(self, "Missing Websites", "Please enter at least one target website.")
+            return
+
+        self.accept()
 
     def get_project_config(self) -> ProjectConfig:
         """Get project configuration"""
@@ -694,20 +875,21 @@ class ProjectDialog(QDialog):
 
         return ProjectConfig(
             id=f"project_{uuid.uuid4().hex[:8]}",
-            name=self.name_input.text(),
-            description=self.description_input.toPlainText(),
+            name=self.name_input.text().strip(),
+            description=self.description_input.toPlainText().strip(),
             domain=self.domain_combo.currentText(),
             target_websites=websites,
             scraping_rules=[],
-            output_settings={"format": "jsonl", "include_metadata": True},
-            rate_limiting={"delay": 2.0, "respect_robots": True},
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat()
         )
 
 
 class RulesManager(QWidget):
-    """Manage scraping rules"""
+    """Manage scraping rules with edit/delete functionality"""
+
+    rule_updated = Signal(ScrapingRule)
+    rule_deleted = Signal(str)  # rule_id
 
     def __init__(self):
         super().__init__()
@@ -717,31 +899,106 @@ class RulesManager(QWidget):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Header
         header = QLabel("📋 Scraping Rules")
         header.setFont(QFont("Arial", 14, QFont.Bold))
         header.setStyleSheet("color: #4CAF50; margin: 10px 0;")
 
-        # Rules table
         self.rules_table = QTableWidget()
-        self.rules_table.setColumnCount(4)
-        self.rules_table.setHorizontalHeaderLabels(["Name", "Semantic Label", "Importance", "Selector"])
+        self.rules_table.setColumnCount(3)
+        self.rules_table.setHorizontalHeaderLabels(["Name", "Type", "Selector"])
+        self.rules_table.setSelectionBehavior(QAbstractItemView.SelectRows)
 
-        # Actions
-        actions_layout = QHBoxLayout()
+        # Rule actions
+        rule_actions_layout = QHBoxLayout()
+        self.edit_rule_btn = QPushButton("✏️ Edit Rule")
+        self.delete_rule_btn = QPushButton("🗑️ Delete Rule")
+        self.edit_rule_btn.setEnabled(False)
+        self.delete_rule_btn.setEnabled(False)
+
+        rule_actions_layout.addWidget(self.edit_rule_btn)
+        rule_actions_layout.addWidget(self.delete_rule_btn)
+        rule_actions_layout.addStretch()
+
+        # Export actions
+        export_actions_layout = QHBoxLayout()
         self.test_all_btn = QPushButton("🧪 Test All")
         self.export_btn = QPushButton("💾 Export Config")
-        self.run_scrape_btn = QPushButton("🚀 Run Scrape")
+        self.run_scrape_btn = QPushButton("🚀 Run Scraper")
         self.run_scrape_btn.setProperty("class", "success")
 
-        actions_layout.addWidget(self.test_all_btn)
-        actions_layout.addWidget(self.export_btn)
-        actions_layout.addStretch()
-        actions_layout.addWidget(self.run_scrape_btn)
+        export_actions_layout.addWidget(self.test_all_btn)
+        export_actions_layout.addWidget(self.export_btn)
+        export_actions_layout.addStretch()
+        export_actions_layout.addWidget(self.run_scrape_btn)
 
         layout.addWidget(header)
         layout.addWidget(self.rules_table)
-        layout.addLayout(actions_layout)
+        layout.addLayout(rule_actions_layout)
+        layout.addLayout(export_actions_layout)
+
+        # Connect signals
+        self.rules_table.selectionModel().selectionChanged.connect(self.on_rule_selected)
+        self.edit_rule_btn.clicked.connect(self.edit_selected_rule)
+        self.delete_rule_btn.clicked.connect(self.delete_selected_rule)
+        self.export_btn.clicked.connect(self.export_config)
+
+    def on_rule_selected(self):
+        """Handle rule selection"""
+        selected_rows = self.rules_table.selectionModel().selectedRows()
+        has_selection = len(selected_rows) > 0
+        self.edit_rule_btn.setEnabled(has_selection)
+        self.delete_rule_btn.setEnabled(has_selection)
+
+    def edit_selected_rule(self):
+        """Edit the selected rule"""
+        selected_rows = self.rules_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        row = selected_rows[0].row()
+        if 0 <= row < len(self.current_rules):
+            rule = self.current_rules[row]
+            dialog = RuleEditDialog(rule, self)
+            if dialog.exec() == QDialog.Accepted:
+                updated_rule = dialog.get_updated_rule()
+                self.current_rules[row] = updated_rule
+                self.refresh_rules_table()
+                self.rule_updated.emit(updated_rule)
+
+                # Update in parent project
+                main_window = self.window()
+                if hasattr(main_window, 'current_project') and main_window.current_project:
+                    for i, project_rule in enumerate(main_window.current_project.scraping_rules):
+                        if project_rule.id == updated_rule.id:
+                            main_window.current_project.scraping_rules[i] = updated_rule
+                            break
+
+    def delete_selected_rule(self):
+        """Delete the selected rule"""
+        selected_rows = self.rules_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        row = selected_rows[0].row()
+        if 0 <= row < len(self.current_rules):
+            rule = self.current_rules[row]
+
+            reply = QMessageBox.question(self, "Delete Rule",
+                                         f"Are you sure you want to delete the rule '{rule.name}'?",
+                                         QMessageBox.Yes | QMessageBox.No)
+
+            if reply == QMessageBox.Yes:
+                removed_rule = self.current_rules.pop(row)
+                self.refresh_rules_table()
+                self.rule_deleted.emit(removed_rule.id)
+
+                # Remove from parent project
+                main_window = self.window()
+                if hasattr(main_window, 'current_project') and main_window.current_project:
+                    main_window.current_project.scraping_rules = [
+                        r for r in main_window.current_project.scraping_rules
+                        if r.id != removed_rule.id
+                    ]
 
     def add_rule(self, rule: ScrapingRule):
         """Add rule to display"""
@@ -754,11 +1011,75 @@ class RulesManager(QWidget):
 
         for row, rule in enumerate(self.current_rules):
             self.rules_table.setItem(row, 0, QTableWidgetItem(rule.name))
-            self.rules_table.setItem(row, 1, QTableWidgetItem(rule.semantic_label))
-            self.rules_table.setItem(row, 2, QTableWidgetItem(rule.rag_importance))
-            self.rules_table.setItem(row, 3, QTableWidgetItem(rule.selector[:50] + "..."))
+            self.rules_table.setItem(row, 1, QTableWidgetItem(rule.extract_type))
+            self.rules_table.setItem(row, 2, QTableWidgetItem(rule.selector[:50] + "..."))
 
         self.rules_table.resizeColumnsToContents()
+
+    def export_config(self):
+        """Export configuration for your scraping tool"""
+        if not self.current_rules:
+            QMessageBox.warning(self, "No Rules", "Please create some scraping rules first.")
+            return
+
+        # Get the parent window to access project info
+        main_window = self.window()
+        if not hasattr(main_window, 'current_project') or not main_window.current_project:
+            QMessageBox.warning(self, "No Project", "Please select a project first.")
+            return
+
+        project = main_window.current_project
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Scraper Config",
+            f"{project.name.lower().replace(' ', '_')}_config.yaml",
+            "YAML files (*.yaml *.yml)"
+        )
+
+        if filename:
+            # Format EXACTLY like your backend expects
+            config_data = {
+                "domain_info": {
+                    "name": project.name,
+                    "description": project.description,
+                    "domain": project.domain
+                },
+                "sources": [{
+                    "name": project.name.lower().replace(' ', '_'),
+                    "seeds": project.target_websites,
+                    "source_type": project.domain,
+                    "selectors": {
+                        "custom_fields": [
+                            {
+                                "name": rule.name,
+                                "selector": rule.selector,
+                                "extract_type": rule.extract_type,
+                                "attribute_name": rule.attribute_name,
+                                "is_list": rule.is_list,
+                                "required": rule.required
+                            } for rule in self.current_rules
+                        ]
+                    },
+                    "crawl": {
+                        "depth": 1,
+                        "delay_seconds": 2.0,
+                        "respect_robots_txt": True
+                    },
+                    "export": {
+                        "format": "jsonl",
+                        "output_path": f"./data_exports/{project.domain}/{project.name.lower().replace(' ', '_')}.jsonl"
+                    }
+                }]
+            }
+
+            import yaml
+            with open(filename, 'w') as f:
+                yaml.dump(config_data, f, default_flow_style=False, indent=2)
+
+            QMessageBox.information(self, "Export Complete",
+                                    f"Scraper config exported to {filename}\n\n"
+                                    f"Run with: python main.py --mode backend\n"
+                                    f"Then load: {filename}")
 
 
 class RAGDataStudio(QMainWindow):
@@ -770,17 +1091,13 @@ class RAGDataStudio(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowTitle("RAG Data Studio - Professional Scraping Platform")
+        self.setWindowTitle("RAG Data Studio - Visual Scraper Builder")
         self.setGeometry(100, 100, 1600, 1000)
-
-        # Apply dark theme
         self.setStyleSheet(DARK_THEME)
 
-        # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # Main layout with splitters
         main_layout = QHBoxLayout(central_widget)
         main_splitter = QSplitter(Qt.Horizontal)
 
@@ -789,7 +1106,7 @@ class RAGDataStudio(QMainWindow):
         self.project_manager.setMaximumWidth(300)
         main_splitter.addWidget(self.project_manager)
 
-        # Center panel - Browser and controls
+        # Center panel - Browser
         center_widget = QWidget()
         center_layout = QVBoxLayout(center_widget)
 
@@ -807,25 +1124,19 @@ class RAGDataStudio(QMainWindow):
         toolbar_layout.addWidget(self.load_btn)
         toolbar_layout.addWidget(self.selector_btn)
 
-        # Browser
         self.browser = InteractiveBrowser()
 
         center_layout.addLayout(toolbar_layout)
         center_layout.addWidget(self.browser)
-
         main_splitter.addWidget(center_widget)
 
         # Right panel - Targeting and rules
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
 
-        # Element targeter
         self.element_targeter = VisualElementTargeter()
-
-        # Rules manager
         self.rules_manager = RulesManager()
 
-        # Right splitter
         right_splitter = QSplitter(Qt.Vertical)
         right_splitter.addWidget(self.element_targeter)
         right_splitter.addWidget(self.rules_manager)
@@ -835,7 +1146,6 @@ class RAGDataStudio(QMainWindow):
         right_widget.setMaximumWidth(450)
         main_splitter.addWidget(right_widget)
 
-        # Set splitter proportions
         main_splitter.setSizes([280, 870, 450])
         main_layout.addWidget(main_splitter)
 
@@ -844,46 +1154,12 @@ class RAGDataStudio(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready - Create a project and start building scrapers")
 
-        # Menu bar
-        self.create_menu_bar()
-
         # Connect signals
         self.load_btn.clicked.connect(self.load_page)
         self.selector_btn.clicked.connect(self.toggle_selector_mode)
         self.project_manager.project_selected.connect(self.load_project)
         self.element_targeter.rule_created.connect(self.add_rule_to_project)
         self.browser.set_targeting_widget(self.element_targeter)
-
-    def create_menu_bar(self):
-        """Create menu bar"""
-        menubar = self.menuBar()
-
-        # File menu
-        file_menu = menubar.addMenu('File')
-        new_action = QAction('New Project', self)
-        new_action.triggered.connect(self.project_manager.create_new_project)
-        file_menu.addAction(new_action)
-
-        file_menu.addSeparator()
-        export_action = QAction('Export Configuration', self)
-        export_action.triggered.connect(self.export_configuration)
-        file_menu.addAction(export_action)
-
-        # Tools menu
-        tools_menu = menubar.addMenu('Tools')
-        test_action = QAction('Test All Rules', self)
-        test_action.triggered.connect(self.test_all_rules)
-        tools_menu.addAction(test_action)
-
-        scrape_action = QAction('Run Scraping Pipeline', self)
-        scrape_action.triggered.connect(self.run_scraping_pipeline)
-        tools_menu.addAction(scrape_action)
-
-        # Help menu
-        help_menu = menubar.addMenu('Help')
-        about_action = QAction('About RAG Data Studio', self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
 
     def load_page(self):
         """Load page in browser"""
@@ -932,101 +1208,7 @@ class RAGDataStudio(QMainWindow):
         self.current_project.updated_at = datetime.now().isoformat()
 
         self.rules_manager.add_rule(rule)
-        self.status_bar.showMessage(f"Added rule: {rule.name} ({rule.semantic_label})")
-
-    def export_configuration(self):
-        """Export current project as YAML configuration"""
-        if not self.current_project:
-            QMessageBox.warning(self, "No Project", "Please select a project first.")
-            return
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Export Configuration",
-            f"{self.current_project.name.lower().replace(' ', '_')}_config.yaml",
-            "YAML files (*.yaml *.yml)"
-        )
-
-        if filename:
-            config_data = self.convert_to_yaml_format(self.current_project)
-
-            import yaml
-            with open(filename, 'w') as f:
-                yaml.dump(config_data, f, default_flow_style=False, indent=2)
-
-            QMessageBox.information(self, "Export Complete",
-                                    f"Configuration exported to {filename}")
-
-    def convert_to_yaml_format(self, project: ProjectConfig) -> dict:
-        """Convert project to YAML configuration format"""
-        return {
-            "domain_info": {
-                "name": project.name,
-                "description": project.description,
-                "domain": project.domain,
-                "created_at": project.created_at
-            },
-            "global_user_agent": f"RAGScraper/{project.name}",
-            "sources": [{
-                "name": project.name.lower().replace(' ', '_'),
-                "seeds": project.target_websites,
-                "source_type": project.domain,
-                "selectors": {
-                    "custom_fields": [
-                        {
-                            "name": rule.name,
-                            "selector": rule.selector,
-                            "extract_type": rule.extraction_type,
-                            "attribute_name": rule.attribute_name,
-                            "is_list": rule.is_list,
-                            "semantic_label": rule.semantic_label,
-                            "rag_importance": rule.rag_importance,
-                            "required": rule.required
-                        } for rule in project.scraping_rules
-                    ]
-                },
-                "crawl": {
-                    "depth": 1,
-                    "delay_seconds": project.rate_limiting.get("delay", 2.0),
-                    "respect_robots_txt": project.rate_limiting.get("respect_robots", True)
-                },
-                "export": {
-                    "format": project.output_settings.get("format", "jsonl"),
-                    "output_path": f"./data_exports/{project.domain}/{project.name.lower().replace(' ', '_')}.jsonl"
-                }
-            }]
-        }
-
-    def test_all_rules(self):
-        """Test all rules against current page"""
-        if not self.current_project or not self.current_project.scraping_rules:
-            QMessageBox.warning(self, "No Rules", "Please create some scraping rules first.")
-            return
-
-        QMessageBox.information(self, "Testing",
-                                f"Testing {len(self.current_project.scraping_rules)} rules against current page...")
-
-    def run_scraping_pipeline(self):
-        """Run the full scraping pipeline"""
-        if not self.current_project:
-            QMessageBox.warning(self, "No Project", "Please select a project first.")
-            return
-
-        reply = QMessageBox.question(self, "Run Scraper",
-                                     f"Run scraping pipeline for project '{self.current_project.name}'?\n\n"
-                                     f"Target websites: {len(self.current_project.target_websites)}\n"
-                                     f"Scraping rules: {len(self.current_project.scraping_rules)}")
-
-        if reply == QMessageBox.Yes:
-            self.status_bar.showMessage("🚀 Starting scraping pipeline...")
-
-    def show_about(self):
-        """Show about dialog"""
-        QMessageBox.about(self, "About RAG Data Studio",
-                          "RAG Data Studio v1.0\n\n"
-                          "Professional Visual Scraping Platform\n"
-                          "for RAG and AI Agent Development\n\n"
-                          "Build custom scrapers with semantic labeling\n"
-                          "for optimal RAG ingestion across any domain.")
+        self.status_bar.showMessage(f"Added rule: {rule.name}")
 
 
 if __name__ == "__main__":

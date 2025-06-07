@@ -7,6 +7,8 @@ Launch either the visual scraping GUI or the backend scraping interface.
 
 import sys
 import os
+import time
+import threading
 import argparse
 from pathlib import Path
 
@@ -57,6 +59,48 @@ def launch_backend_gui():
         return 1
 
 
+def launch_selector_tool():
+    """Launch the selector to scraper tool with integrated service"""
+    try:
+        from PySide6.QtWidgets import QApplication
+        from scraper_service import ScraperService
+        from selector_scraper import SelectorScraperTool, DARK_THEME
+
+        print("🚀 Starting Selector to Scraper Tool...")
+
+        # Start scraper service in background thread
+        def start_service():
+            try:
+                service = ScraperService()
+                service.start_service()
+            except Exception as e:
+                print(f"Scraper service error: {e}")
+
+        service_thread = threading.Thread(target=start_service, daemon=True)
+        service_thread.start()
+
+        # Give service a moment to start
+        time.sleep(1)
+        print("✅ Scraper service starting in background")
+
+        # Start GUI
+        app = QApplication(sys.argv)
+        app.setStyleSheet(DARK_THEME)
+
+        window = SelectorScraperTool()
+        window.show()
+
+        print("✅ GUI started")
+        print("📋 Ready: Load page → Target elements → Send to scraper")
+
+        return app.exec()
+
+    except ImportError as e:
+        print(f"❌ Failed to import Selector Tool: {e}")
+        print("💡 Make sure scraper_service.py and selector_scraper.py are available")
+        return 1
+
+
 def run_scraper_cli(query_or_config):
     """Run the scraper from command line"""
     try:
@@ -84,8 +128,8 @@ def run_scraper_cli(query_or_config):
 
 def main():
     parser = argparse.ArgumentParser(description="RAG Data Studio - Professional Scraping Platform")
-    parser.add_argument("--mode", choices=["visual", "backend", "cli"], default="visual",
-                        help="Launch mode: visual (main GUI), backend (scraper GUI), or cli (command line)")
+    parser.add_argument("--mode", choices=["visual", "backend", "selector", "cli"], default="selector",
+                        help="Launch mode: visual (main GUI), backend (scraper GUI), selector (new tool), or cli (command line)")
     parser.add_argument("--query", type=str, help="Query or config file path for CLI mode")
 
     args = parser.parse_args()
@@ -104,6 +148,9 @@ def main():
     elif args.mode == "backend":
         print("🔧 Launching Backend GUI...")
         return launch_backend_gui()
+    elif args.mode == "selector":
+        print("🎯 Launching Selector to Scraper Tool...")
+        return launch_selector_tool()
     elif args.mode == "cli":
         if not args.query:
             print("❌ CLI mode requires --query parameter")
